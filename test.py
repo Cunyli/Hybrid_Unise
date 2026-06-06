@@ -11,12 +11,16 @@ from dataloader import DataModule
 def main(args):
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
+    config.setdefault('_config_dir', str(Path(args.config).expanduser().resolve().parent))
     
     if args.save_enhanced is not None:
         config['save_enhanced'] = args.save_enhanced
         Path(args.save_enhanced).mkdir(parents=True, exist_ok=True)
     if args.ckpt_path is not None:
         config['ckpt_path'] = args.ckpt_path
+    if args.stage is not None:
+        config['stage'] = args.stage
+    config['stage_init_checkpoint'] = None
     
     model = Model(config=config)
 
@@ -29,13 +33,14 @@ def main(args):
         logger=False,
     )
 
-    trainer.test(model, data_module, ckpt_path=config['ckpt_path'], weights_only=False)
+    trainer.test(model, datamodule=data_module, ckpt_path=config['ckpt_path'])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('test model')
     parser.add_argument('--config', type=str, default='./conf/config.yaml')
     parser.add_argument('--save_enhanced', type=str, default=None, help='The dir path to save enhanced wavs.')
     parser.add_argument('--ckpt_path', type=str, default=None, help='Checkpoint path for inference.')
+    parser.add_argument('--stage', type=str, choices=('disc', 'gen', 'fusion', 'joint'), default=None, help='Override hybrid stage for checkpoint evaluation.')
 
     args = parser.parse_args()
     sys.exit(main(args))

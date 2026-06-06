@@ -170,6 +170,7 @@ def main(args):
     
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
+    config.setdefault('_config_dir', str(Path(args.config).expanduser().resolve().parent))
     
     tb_logger = TensorBoardLogger(save_dir=config['log_dir'], name='tensorboard')
     logger = tb_logger
@@ -210,7 +211,7 @@ def main(args):
         log_every_n_steps=wandb_log_interval_steps,
     )
 
-    trainer.fit(model, data_module, ckpt_path=resume_path, weights_only=False)
+    trainer.fit(model, datamodule=data_module, ckpt_path=resume_path)
 
 
 

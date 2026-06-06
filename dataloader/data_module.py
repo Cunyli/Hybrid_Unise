@@ -20,11 +20,60 @@ import yaml
 import time
 import collections
 import sys
+from contextlib import contextmanager
 
 from .simulation import simulate_data
 
 import warnings
 warnings.filterwarnings("ignore")
+
+
+_GLOBAL_RNG_LOCK = threading.Lock()
+
+
+def stable_uint32(*parts):
+    text = "|".join(str(part) for part in parts)
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16) % (2**32)
+
+
+@contextmanager
+def preserve_global_rng():
+    with _GLOBAL_RNG_LOCK:
+        py_state = random.getstate()
+        np_state = np.random.get_state()
+        try:
+            yield
+        finally:
+            random.setstate(py_state)
+            np.random.set_state(np_state)
+
+
+def make_sr_batch(
+    mode,
+    degraded_wav,
+    clean_wav,
+    sample_rate,
+    length,
+    utterance_id,
+    batch_format="tuple",
+    test=False,
+    source_path=None,
+    clean_path=None,
+):
+    if batch_format == "dict":
+        return {
+            "mode": mode,
+            "degraded_wav": degraded_wav,
+            "clean_wav": clean_wav,
+            "sample_rate": sample_rate,
+            "length": length,
+            "utterance_id": utterance_id,
+            "source_path": source_path,
+            "clean_path": clean_path,
+        }
+    if test:
+        return (mode, None, degraded_wav, clean_wav, sample_rate, length, utterance_id)
+    return (mode, None, degraded_wav, clean_wav, None, sample_rate, length, utterance_id)
 
 
 class WaveInfo:
@@ -64,6 +113,10 @@ class TrainDataLoadIter:
         num_workers: int = 1, 
         prefetch: int = 0,
         samples_per_epoch: int = 10000,
+        batch_format: str = "tuple",
+        sample_rates: Union[int, List[int]] = 16000,
+        modes: Union[str, List[str]] = None,
+        seed: int = 3407,
     ):
         self.is_train = True
         self.batch_size = batch_size
@@ -72,6 +125,14 @@ class TrainDataLoadIter:
         self.num_workers = num_workers
         self.prefetch = prefetch
         self.samples_per_epoch = samples_per_epoch
+        self.batch_format = batch_format
+        self.seed = int(seed)
+        self.epoch = 0
+        self.sample_rates = sample_rates if isinstance(sample_rates, list) else [sample_rates]
+        self.modes = modes if isinstance(modes, list) else ([modes] if modes is not None else ['se', 'tse', 'rtse'])
+        invalid_modes = set(self.modes) - {'se', 'tse', 'rtse'}
+        if invalid_modes:
+            raise ValueError(f"Unsupported training modes: {sorted(invalid_modes)}")
 
         with open(simulation_config, "r") as f:
             self.simulation_config = yaml.safe_load(f)
@@ -107,31 +168,39 @@ class TrainDataLoadIter:
                     path_list.append(WaveInfo(line, type))
         return path_list
     
-    def pad_or_cut_wav(self, wav, length, offset=None):
+    def item_seed(self, sample_index, epoch):
+        return stable_uint32(self.seed, "native", self.rank, epoch, sample_index)
+
+    def pad_or_cut_wav(self, wav, length, rng=None, offset=None):
         # wav: [1, T]
         if wav.shape[-1] < length: # pad
             wav = np.pad(wav, [(0, 0), (0, length - wav.shape[-1])], mode='wrap')
             return wav, None
         else: # cut
             if offset is None:
-                offset = random.randint(0, wav.shape[-1] - length)
+                if rng is None:
+                    offset = random.randint(0, wav.shape[-1] - length)
+                else:
+                    offset = int(rng.integers(0, wav.shape[-1] - length + 1))
             wav = wav[..., offset: offset + length]
             return wav, offset
     
-    def normalize_src_tgt(self, src, tgt, low=0.1, high=0.99):
+    def normalize_src_tgt(self, src, tgt, low=0.1, high=0.99, py_rng=None):
+        py_rng = py_rng if py_rng is not None else random
         max_tgt_value = np.max(np.abs(tgt)) + 1e-5
         max_src_value = np.max(np.abs(src)) + 1e-5
         max_value = max(max_tgt_value, max_src_value)
         threshold = high / max_value  # 防止削波
 
-        target_value = random.uniform(low, high)
+        target_value = py_rng.uniform(low, high)
         factor = min(target_value / max_tgt_value, threshold)
         src = src * factor
         tgt = tgt * factor
 
         return src, tgt
     
-    def normalize_mix_speech_inferf(self, mix, speech, interf, low=0.1, high=0.99):
+    def normalize_mix_speech_inferf(self, mix, speech, interf, low=0.1, high=0.99, py_rng=None):
+        py_rng = py_rng if py_rng is not None else random
         a, b, c = np.max(np.abs(mix)), np.max(np.abs(speech)), np.max(np.abs(interf))
         max_value = max(a, b, c) + 1e-5
         min_value = min(a, b, c)
@@ -140,7 +209,7 @@ class TrainDataLoadIter:
         if min_value * factor <= low:
             return mix * factor, speech * factor, interf * factor
         else:
-            factor = random.uniform(low / (min_value * factor), 1) * factor
+            factor = py_rng.uniform(low / (min_value * factor), 1) * factor
             return mix * factor, speech * factor, interf * factor
 
 
@@ -172,11 +241,14 @@ class TrainDataLoadIter:
             raise Exception('load error')
         return result
     
-    def process_one_sample(self, fs, cut_duration, mode):
-        spk1, spk2 = random.sample(self.spk_list, 2)
+    def process_one_sample(self, sample_index, fs, cut_duration, mode, epoch):
+        item_seed = self.item_seed(sample_index, epoch)
+        py_rng = random.Random(item_seed)
+        rng = np.random.default_rng(item_seed)
+        spk1, spk2 = py_rng.sample(self.spk_list, 2)
 
-        speech_info, enroll_info = random.sample(self.spk2speech[spk1], 2)
-        interf_info = random.choice(self.spk2speech[spk2])
+        speech_info, enroll_info = py_rng.sample(self.spk2speech[spk1], 2)
+        interf_info = py_rng.choice(self.spk2speech[spk2])
         if mode == 'tse' or mode == 'rtse':  # 启用TSE/rTSE模式
             try:
                 speech, _ = self.load_wav_with_timeout(speech_info, fs, timeout=2.0)
@@ -184,15 +256,15 @@ class TrainDataLoadIter:
                 interf, _ = self.load_wav_with_timeout(interf_info, fs, timeout=2.0)
             except Exception as e:
                 print(e)
-                return self.process_one_sample(fs, cut_duration, mode)
-        elif mode == 'se' and random.random() < self.simulation_config['se_interference']['prob']:  # SE模式，启用干扰说话人
+                return self.process_one_sample(sample_index + self.samples_per_epoch, fs, cut_duration, mode, epoch)
+        elif mode == 'se' and py_rng.random() < self.simulation_config['se_interference']['prob']:  # SE模式，启用干扰说话人
             try:
                 speech, _ = self.load_wav_with_timeout(speech_info, fs, timeout=2.0)
                 enroll = None
                 interf, _ = self.load_wav_with_timeout(interf_info, fs, timeout=2.0)
             except Exception as e:
                 print(e)
-                return self.process_one_sample(fs, cut_duration, mode)
+                return self.process_one_sample(sample_index + self.samples_per_epoch, fs, cut_duration, mode, epoch)
         else:  # SE模式，不启用干扰说话人
             try:
                 speech, _ = self.load_wav_with_timeout(speech_info, fs, timeout=2.0)
@@ -200,12 +272,12 @@ class TrainDataLoadIter:
                 interf = None
             except Exception as e:
                 print(e)
-                return self.process_one_sample(fs, cut_duration, mode)
+                return self.process_one_sample(sample_index + self.samples_per_epoch, fs, cut_duration, mode, epoch)
         
-        noise_info = random.choice(self.noise_list)
+        noise_info = py_rng.choice(self.noise_list)
         noise, _ = self.load_wav(noise_info, fs)
         
-        rir_info = random.choice(self.rir_list)
+        rir_info = py_rng.choice(self.rir_list)
         rir, _ = self.load_wav(rir_info, fs)
 
         mix, speech, interf = simulate_data(
@@ -216,35 +288,41 @@ class TrainDataLoadIter:
             rir=rir,
             fs=fs,
             config=self.simulation_config,
+            py_rng=py_rng,
+            rng=rng,
         )
 
         if cut_duration is not None:
             length = int(cut_duration * fs)
-            mix, offset = self.pad_or_cut_wav(mix, length, offset=None)
-            speech, _ = self.pad_or_cut_wav(speech, length, offset)
+            mix, offset = self.pad_or_cut_wav(mix, length, rng=rng, offset=None)
+            speech, _ = self.pad_or_cut_wav(speech, length, rng=rng, offset=offset)
             if interf is not None:
-                interf, _ = self.pad_or_cut_wav(interf, length, offset)
+                interf, _ = self.pad_or_cut_wav(interf, length, rng=rng, offset=offset)
         else:
             length = speech.shape[-1]
         
         if interf is None:
-            mix, speech = self.normalize_src_tgt(mix, speech)
+            mix, speech = self.normalize_src_tgt(mix, speech, py_rng=py_rng)
         else:
-            mix, speech, interf = self.normalize_mix_speech_inferf(mix, speech, interf)
+            mix, speech, interf = self.normalize_mix_speech_inferf(mix, speech, interf, py_rng=py_rng)
 
         if enroll is not None:
-            enroll, _ = self.pad_or_cut_wav(enroll, int(self.enroll_duration * fs), offset=None)
+            enroll, _ = self.pad_or_cut_wav(enroll, int(self.enroll_duration * fs), rng=rng, offset=None)
             enroll = enroll / (np.max(np.abs(enroll)) + 1e-5) * 0.99
 
         return enroll, mix, speech, interf, fs, length, speech_info.utt
     
 
-    def data_iter_fn(self, q, event):
+    def data_iter_fn(self, q, event, epoch):
         executor = ThreadPoolExecutor(max_workers=self.num_workers)
-        for _ in range(len(self)): # for each batch
-            fs = 16000 # sample a fs
-            cut_duration = self.cut_duration if not isinstance(self.cut_duration, list) else random.uniform(*self.cut_duration)  # sample cut_duration
-            mode = random.choice(['se', 'tse', 'rtse'])
+        for batch_idx in range(len(self)): # for each batch
+            batch_seed = stable_uint32(self.seed, "native-batch", self.rank, epoch, batch_idx)
+            batch_rng = random.Random(batch_seed)
+            fs = int(batch_rng.choice(self.sample_rates)) # sample one fs per batch for SFI-compatible grids
+            cut_duration = self.cut_duration if not isinstance(self.cut_duration, list) else batch_rng.uniform(*self.cut_duration)  # sample cut_duration
+            mode = batch_rng.choice(self.modes)
+            start_idx = (batch_idx * self.world_size + self.rank) * self.batch_size
+            sample_indices = list(range(start_idx, start_idx + self.batch_size))
             batch_enroll = []
             batch_mix = []
             batch_speech = []
@@ -252,7 +330,7 @@ class TrainDataLoadIter:
             batch_fs = []
             lengths = []
             names = []
-            for result in executor.map(self.process_one_sample, [fs] * self.batch_size, [cut_duration] * self.batch_size, [mode] * self.batch_size):
+            for result in executor.map(self.process_one_sample, sample_indices, [fs] * self.batch_size, [cut_duration] * self.batch_size, [mode] * self.batch_size, [epoch] * self.batch_size):
                 enroll, mix, speech, interf, fs, length, name = result
                 batch_enroll.append(enroll)
                 batch_mix.append(mix)
@@ -267,13 +345,18 @@ class TrainDataLoadIter:
             batch_interf = torch.from_numpy(np.concatenate(batch_interf, axis=0)).float() if mode != 'se' else None
             batch_fs = torch.LongTensor(batch_fs)
             lengths = torch.LongTensor(lengths)
-            q.put((mode, batch_enroll, batch_mix, batch_speech, batch_interf, batch_fs, lengths, names))
+            if self.batch_format == "dict" and mode == "se":
+                q.put(make_sr_batch(mode, batch_mix, batch_speech, batch_fs, lengths, names, batch_format="dict"))
+            else:
+                q.put((mode, batch_enroll, batch_mix, batch_speech, batch_interf, batch_fs, lengths, names))
         event.set()
     
     def __iter__(self):
+        epoch = self.epoch
+        self.epoch += 1
         q = queue.Queue(maxsize=self.prefetch + 1)
         event = threading.Event()
-        worker = threading.Thread(target=self.data_iter_fn, args=(q, event))
+        worker = threading.Thread(target=self.data_iter_fn, args=(q, event, epoch))
         worker.start()
         while not event.is_set() or not q.empty():
             try:
@@ -310,6 +393,7 @@ class UseSimulationOnTheFlyDataLoadIter:
         samples_per_epoch: int = 1000,
         mode: str = "train",
         seed: int = 3407,
+        batch_format: str = "tuple",
     ):
         self.is_train = mode == "train"
         self.use_simulation_root = Path(use_simulation_root).expanduser()
@@ -323,6 +407,8 @@ class UseSimulationOnTheFlyDataLoadIter:
         self.samples_per_epoch = samples_per_epoch
         self.mode = mode
         self.seed = int(seed)
+        self.batch_format = batch_format
+        self.epoch = 0
 
         with open(Path(simulation_config).expanduser(), "r") as f:
             self.simulation_config = yaml.safe_load(f)
@@ -381,8 +467,8 @@ class UseSimulationOnTheFlyDataLoadIter:
         return random_select_and_order, apply_degradation_wrapper
 
     def stable_seed(self, index):
-        text = f"{self.seed}|{index}|{self.clean_paths[index % len(self.clean_paths)]}"
-        return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16) % (2**32)
+        epoch = self.epoch if self.is_train else 0
+        return stable_uint32(self.seed, self.mode, self.rank, epoch, index, self.clean_paths[index % len(self.clean_paths)])
 
     def load_wav(self, path, fs=16000):
         wav, _ = librosa.load(path, dtype=np.float32, sr=fs, mono=False)
@@ -400,27 +486,26 @@ class UseSimulationOnTheFlyDataLoadIter:
             offset = int(rng.integers(0, wav.shape[-1] - length + 1))
         return wav[..., offset: offset + length], offset
 
-    def normalize_src_tgt(self, src, tgt, low=0.1, high=0.99):
+    def normalize_src_tgt(self, src, tgt, py_rng, low=0.1, high=0.99):
         max_tgt_value = np.max(np.abs(tgt)) + 1e-5
         max_src_value = np.max(np.abs(src)) + 1e-5
         max_value = max(max_tgt_value, max_src_value)
         threshold = high / max_value
 
-        target_value = random.uniform(low, high)
+        target_value = py_rng.uniform(low, high)
         factor = min(target_value / max_tgt_value, threshold)
         return src * factor, tgt * factor
 
     def process_one_sample(self, sample_index):
         fs = 16000
+        item_seed = self.stable_seed(sample_index)
+        py_rng = random.Random(item_seed)
         if self.is_train:
-            item_seed = random.randint(0, 2**32 - 1)
-            clean_path = random.choice(self.clean_paths)
+            clean_path = self.clean_paths[py_rng.randrange(len(self.clean_paths))]
         else:
-            item_seed = self.stable_seed(sample_index)
             clean_path = self.clean_paths[sample_index % len(self.clean_paths)]
 
         rng = np.random.default_rng(item_seed)
-        py_rng = random.Random(item_seed)
         noise_path = self.noise_paths[py_rng.randrange(len(self.noise_paths))]
         rir_path = self.rir_paths[py_rng.randrange(len(self.rir_paths))]
 
@@ -428,21 +513,22 @@ class UseSimulationOnTheFlyDataLoadIter:
         noise = self.load_wav(noise_path, fs)
         rir = self.load_wav(rir_path, fs)
 
-        cut_duration = self.cut_duration if not isinstance(self.cut_duration, list) else random.uniform(*self.cut_duration)
+        cut_duration = self.cut_duration if not isinstance(self.cut_duration, list) else py_rng.uniform(*self.cut_duration)
         length = int(cut_duration * fs)
         speech, _ = self.pad_or_cut_wav(speech, length, rng)
 
-        degrad_cfgs, selected_degrads = self.random_select_and_order(self.simulation_config, seed=item_seed)
-        clean, mix = self.apply_degradation_with_wind(
-            self.simulation_config,
-            speech,
-            noise,
-            rir,
-            None,
-            degrad_cfgs,
-            selected_degrads,
-            seed=item_seed,
-        )
+        with preserve_global_rng():
+            degrad_cfgs, selected_degrads = self.random_select_and_order(self.simulation_config, seed=item_seed)
+            clean, mix = self.apply_degradation_with_wind(
+                self.simulation_config,
+                speech,
+                noise,
+                rir,
+                None,
+                degrad_cfgs,
+                selected_degrads,
+                seed=item_seed,
+            )
 
         if mix.shape[-1] > length:
             mix = mix[..., :length]
@@ -454,7 +540,7 @@ class UseSimulationOnTheFlyDataLoadIter:
         elif clean.shape[-1] < length:
             clean = np.pad(clean, [(0, 0), (0, length - clean.shape[-1])], mode='wrap')
 
-        mix, clean = self.normalize_src_tgt(mix, clean)
+        mix, clean = self.normalize_src_tgt(mix, clean, py_rng)
         name = Path(clean_path).stem
         return None, mix.astype(np.float32), clean.astype(np.float32), None, fs, length, name
 
@@ -463,9 +549,16 @@ class UseSimulationOnTheFlyDataLoadIter:
         speech = torch.from_numpy(np.concatenate(batch_speech, axis=0)).float()
         fs = torch.LongTensor(batch_fs)
         lengths = torch.LongTensor(lengths)
-        if self.mode == "test":
-            return ("se", None, mix, speech, fs, lengths, names)
-        return ("se", None, mix, speech, None, fs, lengths, names)
+        return make_sr_batch(
+            "se",
+            mix,
+            speech,
+            fs,
+            lengths,
+            names,
+            batch_format=self.batch_format,
+            test=self.mode == "test",
+        )
 
     def data_iter_fn(self, q, event):
         executor = ThreadPoolExecutor(max_workers=self.num_workers)
@@ -488,6 +581,8 @@ class UseSimulationOnTheFlyDataLoadIter:
         event.set()
 
     def __iter__(self):
+        if self.is_train:
+            self.epoch += 1
         executor = ThreadPoolExecutor(max_workers=self.num_workers)
         for batch_idx in range(len(self)):
             start_idx = (batch_idx * self.world_size + self.rank) * self.batch_size
@@ -528,6 +623,8 @@ class UseSimulationFixedPairDataLoadIter:
         samples_per_epoch: Union[int, None] = None,
         mode: str = "train",
         seed: int = 3407,
+        batch_format: str = "tuple",
+        target_sample_rate: int = 16000,
     ):
         self.is_train = mode == "train"
         self.use_simulation_root = Path(use_simulation_root).expanduser()
@@ -539,13 +636,16 @@ class UseSimulationFixedPairDataLoadIter:
         self.samples_per_epoch = samples_per_epoch
         self.mode = mode
         self.seed = int(seed)
+        self.batch_format = batch_format
+        self.target_sample_rate = int(target_sample_rate)
+        self.epoch = 0
 
         self.dataset = self.import_fixed_pair_dataset()(
             pair_manifest=self.pair_manifest,
             wav_len=None,
             num_per_epoch=0,
             random_start=False,
-            target_sample_rate=16000,
+            target_sample_rate=self.target_sample_rate,
             mode="train" if self.is_train else "validation",
             normalize=True,
             seed=self.seed,
@@ -582,8 +682,8 @@ class UseSimulationFixedPairDataLoadIter:
 
     def stable_seed(self, sample_index):
         item = self.meta[sample_index % len(self.meta)]
-        text = f"{self.seed}|{self.mode}|{sample_index}|{item.get('id', '')}"
-        return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16) % (2**32)
+        epoch = self.epoch if self.is_train else 0
+        return stable_uint32(self.seed, self.mode, self.rank, epoch, sample_index, item.get('id', ''))
 
     def target_length(self, rng):
         if self.cut_duration is None:
@@ -592,7 +692,7 @@ class UseSimulationFixedPairDataLoadIter:
             duration = random.Random(int(rng.integers(0, 2**32 - 1))).uniform(*self.cut_duration)
         else:
             duration = float(self.cut_duration)
-        return int(duration * 16000)
+        return int(duration * self.target_sample_rate)
 
     @staticmethod
     def first_active_start(clean, length, threshold=0.01, min_active_ratio=0.05):
@@ -624,8 +724,8 @@ class UseSimulationFixedPairDataLoadIter:
 
     def process_one_sample(self, sample_index):
         if self.is_train:
-            index = random.randrange(len(self.dataset))
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(self.stable_seed(sample_index))
+            index = int(rng.integers(0, len(self.dataset)))
             random_start = True
         else:
             index = sample_index % len(self.dataset)
@@ -638,16 +738,23 @@ class UseSimulationFixedPairDataLoadIter:
         length = self.target_length(rng)
         mix, clean, length = self.pad_or_cut_pair(mix, clean, length, rng, random_start=random_start)
         name = info.get("id") or Path(info.get("noisy_path", f"item_{index}")).stem
-        return None, mix.astype(np.float32), clean.astype(np.float32), None, 16000, length, name
+        return None, mix.astype(np.float32), clean.astype(np.float32), None, self.target_sample_rate, length, name
 
     def make_batch(self, batch_mix, batch_speech, batch_fs, lengths, names):
         mix = torch.from_numpy(np.concatenate(batch_mix, axis=0)).float()
         speech = torch.from_numpy(np.concatenate(batch_speech, axis=0)).float()
         fs = torch.LongTensor(batch_fs)
         lengths = torch.LongTensor(lengths)
-        if self.mode == "test":
-            return ("se", None, mix, speech, fs, lengths, names)
-        return ("se", None, mix, speech, None, fs, lengths, names)
+        return make_sr_batch(
+            "se",
+            mix,
+            speech,
+            fs,
+            lengths,
+            names,
+            batch_format=self.batch_format,
+            test=self.mode == "test",
+        )
 
     def data_iter_fn(self, q, event):
         executor = ThreadPoolExecutor(max_workers=self.num_workers)
@@ -670,6 +777,8 @@ class UseSimulationFixedPairDataLoadIter:
         event.set()
 
     def __iter__(self):
+        if self.is_train:
+            self.epoch += 1
         executor = ThreadPoolExecutor(max_workers=self.num_workers)
         for batch_idx in range(len(self)):
             start_idx = (batch_idx * self.world_size + self.rank) * self.batch_size
@@ -708,11 +817,15 @@ class ValDataLoadIter:
         batch_size: int = 1,
         num_workers: int = 1,
         prefetch: int = 0,
+        target_sample_rate: Union[int, None] = 16000,
+        batch_format: str = "tuple",
     ):
         self.is_train = False
         self.batch_size = batch_size
         self.mode = mode
         self.enroll_duration = enroll_duration
+        self.target_sample_rate = target_sample_rate
+        self.batch_format = batch_format
 
         if data_enroll_dir is not None:
             self.data_enroll_dir = Path(data_enroll_dir)
@@ -743,15 +856,17 @@ class ValDataLoadIter:
     
     def process_one_sample(self, name):
         assert self.batch_size == 1
-        src, fs1 = self.load_wav(self.data_src_dir / name, fs=16000)
-        tgt, fs2 = self.load_wav(self.data_tgt_dir / name, fs=16000)
+        src, fs1 = self.load_wav(self.data_src_dir / name, fs=self.target_sample_rate)
+        tgt, fs2 = self.load_wav(self.data_tgt_dir / name, fs=self.target_sample_rate)
+        if fs1 != fs2:
+            raise ValueError(f"Source/target sample rates differ for {name}: {fs1} vs {fs2}")
         if self.data_enroll_dir is not None:
-            enroll, fs3 = self.load_wav(self.data_enroll_dir / name, fs=16000)
+            enroll, fs3 = self.load_wav(self.data_enroll_dir / name, fs=self.target_sample_rate)
         else:
             enroll, fs3 = None, None
         
         if enroll is not None:
-            length = int(self.enroll_duration * 16000)
+            length = int(self.enroll_duration * fs3)
             if enroll.shape[-1] < length:
                 enroll = np.pad(enroll, [(0, 0), (0, length - enroll.shape[-1])], mode='wrap')
             else:
@@ -759,7 +874,7 @@ class ValDataLoadIter:
             enroll = enroll / (np.max(np.abs(enroll)) + 1e-5) * 0.99
         
         length = src.shape[-1]
-        return enroll, src, tgt, 16000, length, Path(name).stem
+        return enroll, src, tgt, fs1, length, Path(name).stem, str(self.data_src_dir / name), str(self.data_tgt_dir / name)
 
     def data_iter_fn(self, q, event):
         wav_names = deepcopy(self.wav_names)
@@ -773,20 +888,40 @@ class ValDataLoadIter:
             batch_fs = []
             lengths = []
             names = []
+            src_paths = []
+            tgt_paths = []
             for result in executor.map(self.process_one_sample, wav_names[sample_idx:sample_idx + self.batch_size]):
-                enroll, src, tgt, fs, length, name = result
+                enroll, src, tgt, fs, length, name, src_path, tgt_path = result
                 batch_enroll.append(enroll)
                 batch_src.append(src)
                 batch_tgt.append(tgt)
                 batch_fs.append(fs)
                 lengths.append(length)
                 names.append(name)
+                src_paths.append(src_path)
+                tgt_paths.append(tgt_path)
             batch_enroll = torch.from_numpy(np.concatenate(batch_enroll, axis=0)).float() if self.data_enroll_dir else None
             batch_src = torch.from_numpy(np.concatenate(batch_src, axis=0)).float()
             batch_tgt = torch.from_numpy(np.concatenate(batch_tgt, axis=0)).float()
             batch_fs = torch.LongTensor(batch_fs)
             lengths = torch.LongTensor(lengths)
-            q.put((self.mode, batch_enroll, batch_src, batch_tgt, batch_fs, lengths, names))
+            if self.batch_format == "dict":
+                q.put(
+                    make_sr_batch(
+                        self.mode,
+                        batch_src,
+                        batch_tgt,
+                        batch_fs,
+                        lengths,
+                        names,
+                        batch_format="dict",
+                        test=True,
+                        source_path=src_paths,
+                        clean_path=tgt_paths,
+                    )
+                )
+            else:
+                q.put((self.mode, batch_enroll, batch_src, batch_tgt, batch_fs, lengths, names))
         event.set()
 
     def __iter__(self):
@@ -834,6 +969,10 @@ class DataModule(pl.LightningDataModule):
             return UseSimulationOnTheFlyDataLoadIter(**dataset_kwargs)
         if dataset_type == 'use_simulation_fixed':
             return UseSimulationFixedPairDataLoadIter(**dataset_kwargs)
+        if dataset_type == 'use_simulation_rolling_cache':
+            from .rolling_cache import UseSimulationRollingCacheDataLoadIter
+
+            return UseSimulationRollingCacheDataLoadIter(**dataset_kwargs)
         return default_cls(**kwargs)
 
     def setup(self, stage=None):

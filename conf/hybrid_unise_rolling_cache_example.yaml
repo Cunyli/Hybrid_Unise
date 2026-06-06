@@ -1,0 +1,160 @@
+# Hybrid-UniSE training example for compressed dry-data pools with rolling cache.
+# This avoids fully extracting large archives into many inode-heavy wav files.
+
+model_type: hybrid_unise
+stage: disc
+
+accelerator: gpu
+devices: [0]
+max_epochs: 100
+val_check_interval: 1000
+validation_interval_steps: 1000
+checkpoint_interval_steps: 1000
+gradient_clip_val: 5.0
+log_every_n_steps: 50
+log_dir: ./logs/hybrid_unise_rolling_cache
+checkpoint_dir: ./checkpoints/hybrid_unise_rolling_cache
+resume: null
+stage_init_checkpoint: null
+ckpt_path: null
+save_intermediates: false
+fusion_use_teacher_forcing: false
+
+sfi:
+  window_ms: 20.0
+  hop_ms: 10.0
+  supported_sample_rates: [8000, 16000, 24000, 32000, 48000]
+
+discriminative:
+  num_blocks: 8
+  embedding: 64
+  lstm_hidden: 256
+  dropout: 0.0
+
+wavlm:
+  pretrained_name_or_path: microsoft/wavlm-base-plus
+  freeze: true
+  use_pretrained: false
+  feature_dim: 768
+
+xcodec:
+  model_path: ./pretrained/xcodec/hf-audio_xcodec-wavlm-more-data
+  backend: model.xcodec_backends:TransformersXCodecFirstRVQ
+  backend_kwargs:
+    processor_path: null
+    encode_method: encode
+    token_attr: audio_codes
+    trust_remote_code: true
+    bandwidth: null
+  vocab_size: 1024
+  rvq_axis: 1
+
+lm:
+  num_layers: 12
+  hidden_size: 512
+  num_attention_heads: 8
+  dropout: 0.1
+  max_position_embeddings: 4096
+  label_smoothing: 0.0
+
+refinement:
+  channels: 64
+  hidden: 128
+  num_blocks: 4
+  num_heads: 8
+  dropout: 0.0
+  dprnn_window_length: 640
+  dprnn_hop_length: 320
+
+fusion:
+  channels: 32
+
+loss_weights:
+  gen:
+    nll: 1.0
+    complex: 0.1
+    mag: 0.9
+    pmsqe: 0.01
+  fusion:
+    mrstft: 1.0
+    l1: 0.5
+    sqa: 0.0
+
+external_losses:
+  pmsqe:
+    enabled: false
+    import_path: model.quality_losses:AsteroidPMSQELoss
+  sqa:
+    enabled: false
+    import_path: model.quality_losses:TorchaudioSquimObjectiveLoss
+    kwargs:
+      mode: l1
+      weights: [1.0, 1.0, 0.05]
+
+mrstft_loss:
+  fft_sizes: [256, 512, 1024]
+  hop_ratio: 0.25
+
+opt:
+  lr: 2.0e-4
+  weight_decay: 0.01
+sch:
+  warmup_steps: 2000
+  decay: 1.0
+
+resampling:
+  backend: linear
+
+lm_stft_alignment_mode: interpolate
+lm_stft_alignment_tolerance: 2
+
+dataset_config:
+  train_kwargs:
+    dataset_type: use_simulation_rolling_cache
+    dry_data_root: "/scratch/elec/t412-speechcom/Triton - Symptonic/lijie/dry_data_lake"
+    use_simulation_root: /scratch/work/lil14/USE_simulation
+    simulation_config: ./conf/use_simulation_phone_room_16k.yaml
+    cache_dir: ./tmp/rolling_cache
+    run_id: null
+    cache_size_gb: 20
+    shard_size_mb: 1024
+    cleanup_policy: keep_current
+    include_archives: true
+    max_archives_to_index: 128
+    max_archive_members_per_archive: 32
+    clean_statuses: null
+    include_noise_archives: true
+    include_rir_archives: true
+    include_wind_archives: true
+    batch_size: 8
+    cut_duration: [5.0, 5.0]
+    num_workers: 8
+    prefetch: 8
+    samples_per_epoch: 10000
+    mode: train
+    seed: 20260605
+    batch_format: dict
+  val_kwargs:
+    dataset_type: use_simulation_fixed
+    use_simulation_root: /scratch/work/lil14/USE_simulation
+    pair_manifest: /scratch/work/lil14/data/TAU/simulated/phone_room/valid/paired.csv
+    batch_size: 1
+    cut_duration: [5.0, 5.0]
+    num_workers: 1
+    prefetch: 1
+    samples_per_epoch: 38
+    mode: validation
+    seed: 20260513
+    batch_format: dict
+    target_sample_rate: 16000
+  test_kwargs:
+    batch_size: 1
+    num_workers: 1
+    prefetch: 1
+    mode: se
+    data_enroll_dir: null
+    enroll_duration: 5.0
+    target_sample_rate: null
+    batch_format: dict
+    data_src_dir: ./AudioSamples/SR/noisy
+    data_tgt_dir: ./AudioSamples/SR/clean

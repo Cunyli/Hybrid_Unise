@@ -1,0 +1,156 @@
+# Hybrid-UniSE reproduction config for
+# "A Hybrid Discriminative and Generative System for Universal Speech Enhancement"
+# arXiv:2601.19113.
+#
+# Fields marked "implementation choice" fill details not published in the short
+# system paper or not available in this repository as verified weights/modules.
+
+model_type: hybrid_unise
+stage: disc  # disc | gen | fusion | joint
+
+accelerator: gpu
+devices: [0]
+max_epochs: 100
+val_check_interval: 1000
+validation_interval_steps: 1000
+checkpoint_interval_steps: 1000
+gradient_clip_val: 5.0
+log_every_n_steps: 50
+log_dir: ./logs/hybrid_unise_urgent2026
+checkpoint_dir: ./checkpoints/hybrid_unise_urgent2026
+resume: null
+stage_init_checkpoint: null  # use previous-stage weights for gen/fusion/joint initialization; not a strict resume.
+ckpt_path: null
+save_intermediates: false
+fusion_use_teacher_forcing: false  # keep fusion training consistent with inference by default.
+
+sfi:
+  window_ms: 20.0
+  hop_ms: 10.0
+  supported_sample_rates: [8000, 16000, 24000, 32000, 48000]
+
+discriminative:
+  num_blocks: 8
+  embedding: 64
+  lstm_hidden: 256
+  dropout: 0.0
+
+wavlm:
+  pretrained_name_or_path: microsoft/wavlm-base-plus
+  freeze: true
+  use_pretrained: false  # implementation choice: true requires downloading official WavLM weights.
+  feature_dim: 768
+
+xcodec:
+  model_path: ./pretrained/xcodec/hf-audio_xcodec-wavlm-more-data
+  backend: model.xcodec_backends:TransformersXCodecFirstRVQ
+  backend_kwargs:
+    processor_path: null
+    encode_method: encode
+    token_attr: audio_codes  # official Transformers XcodecModel.encode output field
+    trust_remote_code: true
+    bandwidth: null
+  vocab_size: 1024
+  rvq_axis: 1  # official Transformers X-Codec audio_codes are [B, RVQ, T].
+
+lm:
+  num_layers: 12
+  hidden_size: 512
+  num_attention_heads: 8
+  dropout: 0.1
+  max_position_embeddings: 4096
+  label_smoothing: 0.0
+
+refinement:
+  channels: 64          # implementation choice
+  hidden: 128           # implementation choice
+  num_blocks: 4         # implementation choice
+  num_heads: 8
+  dropout: 0.0
+  dprnn_window_length: 640  # paper-reported scale; implementation choice in this STFT refinement wrapper
+  dprnn_hop_length: 320
+
+fusion:
+  channels: 32  # implementation choice: lightweight USES-style spectral fusion
+
+loss_weights:
+  gen:
+    nll: 1.0
+    complex: 0.1
+    mag: 0.9
+    pmsqe: 0.01
+  fusion:
+    mrstft: 1.0
+    l1: 0.5
+    sqa: 0.0
+
+external_losses:
+  pmsqe:
+    enabled: false
+    import_path: model.quality_losses:AsteroidPMSQELoss  # optional verified public PMSQE adapter
+  sqa:
+    enabled: false
+    import_path: model.quality_losses:TorchaudioSquimObjectiveLoss  # implementation choice SQA baseline, not paper's full ensemble
+    kwargs:
+      mode: l1
+      weights: [1.0, 1.0, 0.05]
+
+mrstft_loss:
+  fft_sizes: [256, 512, 1024]
+  hop_ratio: 0.25
+
+opt:
+  lr: 2.0e-4
+  weight_decay: 0.01
+sch:
+  warmup_steps: 2000
+  decay: 1.0
+
+resampling:
+  backend: linear  # implementation choice for bootstrap; replace with torchaudio/soxr for production.
+
+lm_stft_alignment_mode: interpolate  # interpolate | strict
+lm_stft_alignment_tolerance: 2  # strict tolerance before failing; interpolate mode resamples hidden states to STFT frames.
+
+evaluation:
+  enable_intrusive_metrics: false
+  enable_sqa_metrics: false
+
+dataset_config:
+  train_kwargs:
+    dataset_type: use_simulation_fixed
+    use_simulation_root: /scratch/work/lil14/data/USE_simulation
+    pair_manifest: /scratch/work/lil14/data/TAU/train_pairs.csv
+    batch_size: 1
+    cut_duration: 5.0
+    num_workers: 1
+    prefetch: 1
+    samples_per_epoch: 1000
+    mode: train
+    seed: 3407
+    batch_format: dict
+    target_sample_rate: 16000  # USE fixed-pair dataset currently materializes training pairs at this rate.
+  val_kwargs:
+    dataset_type: use_simulation_fixed
+    use_simulation_root: /scratch/work/lil14/data/USE_simulation
+    pair_manifest: /scratch/work/lil14/data/TAU/val_pairs.csv
+    batch_size: 1
+    cut_duration: 5.0
+    num_workers: 1
+    prefetch: 1
+    samples_per_epoch: 100
+    mode: validation
+    seed: 3407
+    batch_format: dict
+    target_sample_rate: 16000
+  test_kwargs:
+    batch_size: 1
+    num_workers: 1
+    prefetch: 1
+    mode: se
+    data_enroll_dir: null
+    enroll_duration: 5.0
+    target_sample_rate: null  # keep original rate for SFI discriminative/fusion branches
+    batch_format: dict
+    data_src_dir: ./AudioSamples/SR/noisy
+    data_tgt_dir: ./AudioSamples/SR/clean

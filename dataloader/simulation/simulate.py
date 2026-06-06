@@ -7,11 +7,12 @@ from .rir_utils import estimate_early_rir, add_reverberation
 from .detect_non_silence import detect_non_silence
 
 
-def mix_noise(speech, noise, snr=5.0):
+def mix_noise(speech, noise, snr=5.0, rng=None):
+    rng = rng if rng is not None else np.random
     len_speech = speech.shape[-1]
     len_noise = noise.shape[-1]
     if len_noise < len_speech:
-        offset = np.random.randint(0, len_speech - len_noise)
+        offset = rng.integers(0, len_speech - len_noise) if hasattr(rng, "integers") else rng.randint(0, len_speech - len_noise)
         # Repeat noise
         noise = np.pad(
             noise,
@@ -19,7 +20,7 @@ def mix_noise(speech, noise, snr=5.0):
             mode="wrap",
         )
     elif len_noise > len_speech:
-        offset = np.random.randint(0, len_noise - len_speech)
+        offset = rng.integers(0, len_noise - len_speech) if hasattr(rng, "integers") else rng.randint(0, len_noise - len_speech)
         noise = noise[:, offset : offset + len_speech]
     
     rms_noise = noise[detect_non_silence(noise)].std()
@@ -78,8 +79,9 @@ def clipping(speech_sample, min_quantile = 0.1, max_quantile = 0.9):
 
 
 def get_packet_loss_indices(
-    speech_length, fs, packet_duration_ms, packet_loss_rate, max_continuous_packet_loss
+    speech_length, fs, packet_duration_ms, packet_loss_rate, max_continuous_packet_loss, rng=None
 ):
+    rng = rng if rng is not None else np.random
     """Returns a list of indices (of packets) that are zeroed out."""
 
     # speech duration in ms and the number of packets
@@ -95,14 +97,14 @@ def get_packet_loss_indices(
     # list of length of each packet loss
     packet_loss_lengths = []
     for _ in range(num_packet_loss):
-        num_continuous_packet_loss = np.random.randint(1, max_continuous_packet_loss)
+        num_continuous_packet_loss = rng.integers(1, max_continuous_packet_loss) if hasattr(rng, "integers") else rng.randint(1, max_continuous_packet_loss)
         packet_loss_lengths.append(num_continuous_packet_loss)
 
         if num_packet_loss - sum(packet_loss_lengths) <= max_continuous_packet_loss:
             packet_loss_lengths.append(num_packet_loss - sum(packet_loss_lengths))
             break
 
-    packet_loss_start_indices = np.random.choice(
+    packet_loss_start_indices = rng.choice(
         range(num_packets), len(packet_loss_lengths), replace=False
     )
     packet_loss_indices = []
@@ -123,32 +125,34 @@ def packet_loss(
     return speech_sample
 
 
-def simulate_data(mode, speech, interf, noise, rir, fs, config):
+def simulate_data(mode, speech, interf, noise, rir, fs, config, py_rng=None, rng=None):
+    py_rng = py_rng if py_rng is not None else random
+    rng = rng if rng is not None else np.random
     # for interference
     if mode == 'tse' or mode == 'rtse':  # 启用TSE/rTSE模式
-        sir = random.uniform(*config['tse_interference']['sir'])
+        sir = py_rng.uniform(*config['tse_interference']['sir'])
     else:  # SE模式
-        sir = random.uniform(*config['se_interference']['sir'])
+        sir = py_rng.uniform(*config['se_interference']['sir'])
     # for additive noise
-    snr = random.uniform(*config['noise']['snr'])
+    snr = py_rng.uniform(*config['noise']['snr'])
     # for bandwidth limitation
-    fs_new = random.choice(config['bandwidth_limitation']['fs_new'])
+    fs_new = py_rng.choice(config['bandwidth_limitation']['fs_new'])
     res_type = config['bandwidth_limitation']['res_type']
     # for clipping
-    min_quantile = random.uniform(*config['clipping']['min_quantile'])
-    max_quantile = random.uniform(*config['clipping']['max_quantile'])
+    min_quantile = py_rng.uniform(*config['clipping']['min_quantile'])
+    max_quantile = py_rng.uniform(*config['clipping']['max_quantile'])
     # for packet loss
     packet_duration_ms = config['packet_loss']['packet_duration_ms']
-    packet_loss_rate = random.uniform(*config['packet_loss']['packet_loss_rate'])
+    packet_loss_rate = py_rng.uniform(*config['packet_loss']['packet_loss_rate'])
     max_continuous_packet_loss = config['packet_loss']['max_continuous_packet_loss']
 
     if interf is not None:
-        noisy = mix_noise(speech, interf, snr=sir)
+        noisy = mix_noise(speech, interf, snr=sir, rng=rng)
         interf = noisy - speech
     else:
         noisy = deepcopy(speech)
 
-    if random.random() < config['reverberation']['prob'] and rir is not None:
+    if py_rng.random() < config['reverberation']['prob'] and rir is not None:
         # print(np.max(rir))
         rir = rir / (np.max(np.abs(rir)) + 1e-5)
         noisy = add_reverberation(noisy, rir)
@@ -157,24 +161,25 @@ def simulate_data(mode, speech, interf, noise, rir, fs, config):
         if interf is not None:
             interf = add_reverberation(interf, early_rir)
     
-    if random.random() < config['noise']['prob']:
-        noisy = mix_noise(noisy, noise, snr=snr)  # 以混响语音计算能量，不改变noisy-clean相对幅度
+    if py_rng.random() < config['noise']['prob']:
+        noisy = mix_noise(noisy, noise, snr=snr, rng=rng)  # 以混响语音计算能量，不改变noisy-clean相对幅度
 
     order_list = [0, 1, 2]
-    random.shuffle(order_list)
+    py_rng.shuffle(order_list)
 
     for order in order_list:
-        if order == 0 and random.random() < config['bandwidth_limitation']['prob']:
+        if order == 0 and py_rng.random() < config['bandwidth_limitation']['prob']:
             noisy = bandwidth_limitation(noisy, fs, fs_new=fs_new, res_type=res_type)
-        elif order == 1 and random.random() < config['clipping']['prob']:
+        elif order == 1 and py_rng.random() < config['clipping']['prob']:
             noisy = clipping(noisy, min_quantile=min_quantile, max_quantile=max_quantile)
-        elif order == 2 and random.random() < config['packet_loss']['prob']:
+        elif order == 2 and py_rng.random() < config['packet_loss']['prob']:
             packet_loss_indices = get_packet_loss_indices(
                 speech.shape[-1],
                 fs,
                 packet_duration_ms,
                 packet_loss_rate,
                 max_continuous_packet_loss,
+                rng=rng,
             )
             noisy = packet_loss(noisy, fs, packet_loss_indices, packet_duration_ms)
     

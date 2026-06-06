@@ -1,0 +1,128 @@
+# Example native simulation config for SFI multi-sample-rate training.
+# Fill dataset paths before use.
+
+model_type: hybrid_unise
+stage: disc
+
+accelerator: gpu
+devices: [0]
+max_epochs: 100
+val_check_interval: 1000
+gradient_clip_val: 5.0
+log_dir: ./logs/hybrid_unise_native_multisr
+checkpoint_dir: ./checkpoints/hybrid_unise_native_multisr
+resume: null
+ckpt_path: null
+
+sfi:
+  window_ms: 20.0
+  hop_ms: 10.0
+  supported_sample_rates: [8000, 16000, 24000, 32000, 48000]
+
+discriminative:
+  num_blocks: 8
+  embedding: 64
+  lstm_hidden: 256
+  dropout: 0.0
+
+wavlm:
+  freeze: true
+  use_pretrained: false
+  feature_dim: 768
+  pretrained_name_or_path: microsoft/wavlm-base-plus
+
+xcodec:
+  backend: deterministic_stub
+  model_path: null
+  vocab_size: 1024
+  rvq_axis: -1
+
+lm:
+  num_layers: 12
+  hidden_size: 512
+  num_attention_heads: 8
+  dropout: 0.1
+  max_position_embeddings: 4096
+  label_smoothing: 0.0
+
+refinement:
+  channels: 64
+  hidden: 128
+  num_blocks: 4
+  num_heads: 8
+  dropout: 0.0
+
+fusion:
+  channels: 32
+
+loss_weights:
+  gen:
+    nll: 1.0
+    complex: 0.1
+    mag: 0.9
+    pmsqe: 0.0
+  fusion:
+    mrstft: 1.0
+    l1: 0.5
+    sqa: 0.0
+
+external_losses:
+  pmsqe:
+    enabled: false
+    import_path: null
+  sqa:
+    enabled: false
+    import_path: null
+
+mrstft_loss:
+  fft_sizes: [256, 512, 1024]
+  hop_ratio: 0.25
+
+opt:
+  lr: 2.0e-4
+
+lm_stft_alignment_mode: interpolate
+lm_stft_alignment_tolerance: 2
+
+dataset_config:
+  train_kwargs:
+    batch_size: 4
+    cut_duration: [5.0, 5.0]
+    enroll_duration: 5.0
+    num_workers: 4
+    prefetch: 4
+    samples_per_epoch: 10000
+    batch_format: dict
+    modes: [se]
+    sample_rates: [8000, 16000, 24000, 32000, 48000]
+    simulation_config: ./conf/simulation_train.yaml
+    speech_scp_base_dir: /path/to/speech_root
+    speech_scp_path: /path/to/speech.scp
+    noise_scp_path: /path/to/noise.scp
+    rir_scp_path: /path/to/rir.scp
+  val_kwargs:
+    batch_size: 1
+    cut_duration: [5.0, 5.0]
+    enroll_duration: 5.0
+    num_workers: 1
+    prefetch: 1
+    samples_per_epoch: 100
+    batch_format: dict
+    modes: [se]
+    sample_rates: [8000, 16000, 24000, 32000, 48000]
+    simulation_config: ./conf/simulation_train.yaml
+    speech_scp_base_dir: /path/to/speech_root
+    speech_scp_path: /path/to/speech.scp
+    noise_scp_path: /path/to/noise.scp
+    rir_scp_path: /path/to/rir.scp
+  test_kwargs:
+    batch_size: 1
+    num_workers: 1
+    prefetch: 1
+    mode: se
+    data_enroll_dir: null
+    enroll_duration: 5.0
+    target_sample_rate: null
+    batch_format: dict
+    data_src_dir: ./AudioSamples/SR/noisy
+    data_tgt_dir: ./AudioSamples/SR/clean

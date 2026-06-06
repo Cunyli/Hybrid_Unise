@@ -1,0 +1,85 @@
+model_type: hybrid_unise
+stage: fusion
+
+accelerator: cpu
+devices: [0]
+max_epochs: 1
+val_check_interval: 1
+gradient_clip_val: 1.0
+log_dir: ./logs/hybrid_unise_smoke
+checkpoint_dir: ./checkpoints/hybrid_unise_smoke
+resume: null
+stage_init_checkpoint: null
+ckpt_path: null
+save_intermediates: true
+fusion_use_teacher_forcing: true  # smoke keeps token logits available for shape checks.
+
+sfi:
+  window_ms: 20.0
+  hop_ms: 10.0
+  supported_sample_rates: [16000]
+
+discriminative:
+  num_blocks: 1
+  embedding: 8
+  lstm_hidden: 4
+  dropout: 0.0
+
+wavlm:
+  freeze: true
+  use_pretrained: false
+  feature_dim: 8
+  pretrained_name_or_path: microsoft/wavlm-base-plus
+
+xcodec:
+  backend: deterministic_stub
+  model_path: null
+  vocab_size: 32
+  rvq_axis: -1
+
+lm:
+  num_layers: 1
+  hidden_size: 16
+  num_attention_heads: 4
+  dropout: 0.0
+  max_position_embeddings: 256
+  label_smoothing: 0.0
+
+refinement:
+  channels: 8
+  hidden: 4
+  num_blocks: 1
+  num_heads: 2
+  dropout: 0.0
+
+fusion:
+  channels: 8
+
+loss_weights:
+  gen:
+    nll: 1.0
+    complex: 0.1
+    mag: 0.9
+    pmsqe: 0.0
+  fusion:
+    mrstft: 1.0
+    l1: 0.5
+    sqa: 0.0
+
+external_losses:
+  pmsqe:
+    enabled: false
+    import_path: null
+  sqa:
+    enabled: false
+    import_path: null
+
+mrstft_loss:
+  fft_sizes: [64]
+  hop_ratio: 0.25
+
+opt:
+  lr: 1.0e-3
+
+lm_stft_alignment_mode: interpolate
+lm_stft_alignment_tolerance: 2
