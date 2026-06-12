@@ -14,16 +14,14 @@ wandb/**
 lightning_logs/**
 checkpoints/**
 pretrained/**
+artifacts/**
 outputs/**
 runs/**
 tmp/**
 conf/generated/**
-AGENTS.md
-CLAUDE.md
+docs/**
 
 results/
 
 !**/.gitkeep
 !**/.keep
-!docs/
-!docs/**/*.md
