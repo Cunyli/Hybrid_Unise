@@ -18,12 +18,16 @@ class LLM_SFT(CustomLlamaModel):
             'se': 0,
         },
         feats_dim: int = 768,
+        global_loss_weight: float = 1.0,
+        semantic_loss_weight: float = 1.0,
         llm_base_config: dict= {},
     ):
         super().__init__(
             **llm_base_config
         )
         self.task_map = task_map
+        self.global_loss_weight = float(global_loss_weight)
+        self.semantic_loss_weight = float(semantic_loss_weight)
 
         # 任务专属token
         self.task_embedding = nn.Embedding(num_tasks, llm_base_config['hidden_size'])
@@ -94,16 +98,24 @@ class LLM_SFT(CustomLlamaModel):
         semantic_logits = logits[:, semantic_start:semantic_end, :]
         semantic_targets = target_ids[:, semantic_start:semantic_end]
 
+        global_loss = self.loss_function(global_logits, global_targets)
+        semantic_loss = self.loss_function(semantic_logits, semantic_targets)
+        weighted_loss = (
+            self.global_loss_weight * global_loss
+            + self.semantic_loss_weight * semantic_loss
+        ) / max(self.global_loss_weight + self.semantic_loss_weight, 1e-8)
+
         metrics = {
             'loss': loss,
+            'weighted_loss': weighted_loss,
             'acc': acc,
-            'global_loss': self.loss_function(global_logits, global_targets),
-            'semantic_loss': self.loss_function(semantic_logits, semantic_targets),
+            'global_loss': global_loss,
+            'semantic_loss': semantic_loss,
             'global_acc': (global_logits.argmax(-1) == global_targets).float().mean(),
             'semantic_acc': (semantic_logits.argmax(-1) == semantic_targets).float().mean(),
         }
 
-        return loss, metrics
+        return weighted_loss, metrics
 
 
     # 重写generate

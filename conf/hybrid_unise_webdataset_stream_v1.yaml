@@ -1,0 +1,118 @@
+accelerator: gpu
+devices:
+- 0
+log_dir: ./logs/hybrid_unise_webdataset_stream_v1
+checkpoint_dir: ./checkpoints/hybrid_unise_webdataset_stream_v1
+resume: null
+ckpt_path: ./checkpoints/epoch=20-step=109367.ckpt
+save_top_k: 1
+wandb:
+  use_wandb: true
+  project: unise
+  entity: null
+  repo_name: QuarkAudio-UniSE
+  model_name: unise
+  experiment: hybrid_unise_webdataset_stream_v1
+  change: shared_webdataset_fixed_valid_test_v1
+  group: null
+  name: null
+  tags:
+  - shared_webdataset
+  - hybrid_unise
+  - use_simulation
+  - fixed_recipe
+  - stream_train
+  - semantic_w_0.25
+  - 1gpu
+dataset_config:
+  train_kwargs:
+    dataset_type: hybrid_unise_webdataset_stream
+    split_root: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10
+    simulation_config: ./conf/simulation_train.yaml
+    batch_size: 32
+    cut_duration:
+    - 5.0
+    - 5.0
+    samples_per_epoch: 100000
+    target_sample_rate: 16000
+    num_workers: 8
+    prefetch: 8
+    clean_shuffle_buffer: 4096
+    noise_buffer_size: 2048
+    rir_buffer_size: 2048
+    shard_shuffle_seed: 3407
+    tar_cache_size: 8
+    streaming_mode: sequential
+    batch_format: tuple
+  val_kwargs:
+    dataset_type: hybrid_unise_webdataset_fixed_recipe
+    recipe_manifest: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/valid/fixed_recipes.jsonl
+    simulation_config: ./conf/simulation_train.yaml
+    batch_size: 4
+    cut_duration: 5.0
+    target_sample_rate: 16000
+    num_workers: 4
+    prefetch: 4
+    batch_format: tuple
+    mode: validation
+  test_kwargs:
+    dataset_type: hybrid_unise_webdataset_fixed_recipe
+    recipe_manifest: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/test/fixed_recipes.jsonl
+    simulation_config: ./conf/simulation_train.yaml
+    batch_size: 1
+    cut_duration: 5.0
+    target_sample_rate: 16000
+    num_workers: 2
+    prefetch: 2
+    batch_format: tuple
+    mode: test
+save_enhanced: ./outputs/hybrid_unise_webdataset_stream_v1/test
+max_epochs: 80
+validation_interval_steps: 300
+wandb_log_interval_steps: 25
+avqi_validation_interval_steps: 0
+avqi_validation_script: null
+checkpoint_interval_steps: 1000
+gradient_clip_val: 5.0
+opt:
+  lr: 0.0005
+sch:
+  warmup_steps: 1000
+  step_decay: 0.99998
+  min_factor: 0.02
+codec_ckpt_dir: ./pretrained/Spark-TTS-0.5B
+stft_config:
+  hop_length: 320
+  win_length: 640
+  n_fft: 640
+  n_mels: 80
+llm_config:
+  num_tasks: 3
+  task_map:
+    se: 0
+    tse: 1
+    rtse: 2
+  feats_dim: 768
+  llm_base_config:
+    cond_dim: 80
+    global_size: 4096
+    semantic_size: 8192
+    hidden_size: 512
+    num_layers: 12
+    num_attention_heads: 8
+    dropout_p: 0.1
+    max_position_embeddings: 4096
+    label_smoothing: 0.1
+    conformer_params:
+      num_layers: 6
+      dim: 512
+      heads: 8
+      dim_head: 64
+      depthwise_conv_kernel_size: 31
+      ff_mult: 4
+      dropout: 0.1
+      qk_norm: null
+      pe_attn_head: 1
+  global_loss_weight: 1.0
+  semantic_loss_weight: 0.25
+trainable_policy: full

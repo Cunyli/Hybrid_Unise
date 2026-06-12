@@ -28,7 +28,7 @@ class ChartsWandbLogger(WandbLogger):
         metrics = {
             key: value
             for key, value in metrics.items()
-            if key.startswith(('charts/', 'train/', 'val/', 'val_avqi/'))
+            if key.startswith(('charts/', 'train/', 'val/', 'val_avqi/', 'val_avqi_pathology/', 'val_avqi_health/'))
         }
         if history_step is not None:
             history_step = int(history_step) + int(is_lightning_validation)
@@ -161,6 +161,8 @@ def build_wandb_logger(config, config_path):
     experiment_obj.define_metric('train/*', step_metric='charts/global_step', overwrite=True)
     experiment_obj.define_metric('val/*', step_metric='charts/global_step', overwrite=True)
     experiment_obj.define_metric('val_avqi/*', step_metric='charts/global_step', overwrite=True)
+    experiment_obj.define_metric('val_avqi_pathology/*', step_metric='charts/global_step', overwrite=True)
+    experiment_obj.define_metric('val_avqi_health/*', step_metric='charts/global_step', overwrite=True)
     experiment_obj.define_metric('charts/*', step_metric='charts/global_step', overwrite=True)
     return logger
 

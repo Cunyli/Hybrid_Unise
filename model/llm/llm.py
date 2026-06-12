@@ -65,6 +65,8 @@ class CustomLlamaModel(nn.Module):
             hidden_size=hidden_size,
             num_hidden_layers=num_layers,
             num_attention_heads=num_attention_heads,
+            num_key_value_heads=num_attention_heads,
+            head_dim=hidden_size // num_attention_heads,
             intermediate_size=hidden_size * 4,
             dropout_rate=dropout_p,
             attention_dropout=dropout_p,
@@ -76,12 +78,43 @@ class CustomLlamaModel(nn.Module):
         self.rotary_emb = llama_model.rotary_emb
         self.norm = llama_model.norm
 
-        self._update_causal_mask = llama_model._update_causal_mask
+        self._update_causal_mask = getattr(llama_model, "_update_causal_mask", None)
         
         # 自定义输出层
         self.output_head = nn.Linear(hidden_size, self.vocab_size, bias=False)  # [hidden_size, vocab_size]
 
         self.label_smoothing = label_smoothing
+
+
+    def _fallback_causal_mask(
+        self,
+        attention_mask: Optional[torch.Tensor],
+        inputs_embeds: torch.Tensor,
+        cache_position: torch.Tensor,
+        past_key_values: Optional[Cache],
+    ) -> torch.Tensor:
+        batch_size, sequence_length = inputs_embeds.shape[:2]
+        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+        target_length = past_seen_tokens + sequence_length
+        min_dtype = torch.finfo(inputs_embeds.dtype).min
+        causal_mask = torch.full(
+            (sequence_length, target_length),
+            fill_value=min_dtype,
+            dtype=inputs_embeds.dtype,
+            device=inputs_embeds.device,
+        )
+        if sequence_length != 1:
+            causal_mask = torch.triu(causal_mask, diagonal=1)
+        causal_mask *= torch.arange(target_length, device=inputs_embeds.device) > cache_position.reshape(-1, 1)
+        causal_mask = causal_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
+
+        if attention_mask is not None:
+            causal_mask = causal_mask.clone()
+            mask_length = attention_mask.shape[-1]
+            padding_mask = causal_mask[:, :, :, :mask_length] + attention_mask[:, None, None, :].to(causal_mask.device)
+            padding_mask = padding_mask == 0
+            causal_mask[:, :, :, :mask_length] = causal_mask[:, :, :, :mask_length].masked_fill(padding_mask, min_dtype)
+        return causal_mask
 
 
     def loss_function(self, logits, target):
@@ -179,9 +212,12 @@ class CustomLlamaModel(nn.Module):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        )
+        if self._update_causal_mask is not None:
+            causal_mask = self._update_causal_mask(
+                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            )
+        else:
+            causal_mask = self._fallback_causal_mask(attention_mask, inputs_embeds, cache_position, past_key_values)
 
         hidden_states = inputs_embeds
 
@@ -208,9 +244,9 @@ class CustomLlamaModel(nn.Module):
                 **flash_attn_kwargs,
             )
 
-            hidden_states = layer_outputs[0]
+            hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
 
-            if output_attentions:
+            if output_attentions and isinstance(layer_outputs, tuple):
                 all_self_attns += (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
@@ -404,4 +440,3 @@ if __name__=='__main__':
 
     # global_ids, semantic_ids = model.generate(input_ids=None)
     print(sum([p.numel() for p in model.parameters()]))
-

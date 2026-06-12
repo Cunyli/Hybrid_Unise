@@ -22,7 +22,13 @@ import collections
 import sys
 from contextlib import contextmanager
 
+from .gap_webdataset import GapWebDatasetDataLoadIter
+from .hybrid_webdataset_protocol import (
+    HybridUniSEWebDatasetFixedRecipeDataLoadIter,
+    HybridUniSEWebDatasetStreamDataLoadIter,
+)
 from .simulation import simulate_data
+from .rolling_cache import UseSimulationRollingCacheDataLoadIter
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -962,25 +968,35 @@ class DataModule(pl.LightningDataModule):
         self.test_kwargs = test_kwargs
 
     @staticmethod
-    def build_dataset(kwargs, default_cls):
+    def build_dataset(kwargs, default_cls, split=None):
         dataset_type = kwargs.get('dataset_type')
         dataset_kwargs = {key: value for key, value in kwargs.items() if key != 'dataset_type'}
         if dataset_type in ('use_simulation', 'use_simulation_onthefly'):
             return UseSimulationOnTheFlyDataLoadIter(**dataset_kwargs)
+        if dataset_type == 'use_simulation_rolling_cache':
+            return UseSimulationRollingCacheDataLoadIter(**dataset_kwargs)
         if dataset_type == 'use_simulation_fixed':
             return UseSimulationFixedPairDataLoadIter(**dataset_kwargs)
-        if dataset_type == 'use_simulation_rolling_cache':
-            from .rolling_cache import UseSimulationRollingCacheDataLoadIter
-
-            return UseSimulationRollingCacheDataLoadIter(**dataset_kwargs)
+        if dataset_type in ('gap_webdataset', 'gap_unipase_webdataset'):
+            if split in ('val', 'test') and 'mode' not in dataset_kwargs:
+                dataset_kwargs['mode'] = 'test' if split == 'test' else 'validation'
+            elif split == 'train' and 'mode' not in dataset_kwargs:
+                dataset_kwargs['mode'] = 'train'
+            return GapWebDatasetDataLoadIter(**dataset_kwargs)
+        if dataset_type == 'hybrid_unise_webdataset_stream':
+            return HybridUniSEWebDatasetStreamDataLoadIter(**dataset_kwargs)
+        if dataset_type == 'hybrid_unise_webdataset_fixed_recipe':
+            if split in ('val', 'test') and 'mode' not in dataset_kwargs:
+                dataset_kwargs['mode'] = 'test' if split == 'test' else 'validation'
+            return HybridUniSEWebDatasetFixedRecipeDataLoadIter(**dataset_kwargs)
         return default_cls(**kwargs)
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            self.train_iter = self.build_dataset(self.train_kwargs, TrainDataLoadIter)
-            self.val_iter = self.build_dataset(self.val_kwargs, TrainDataLoadIter)
+            self.train_iter = self.build_dataset(self.train_kwargs, TrainDataLoadIter, split='train')
+            self.val_iter = self.build_dataset(self.val_kwargs, TrainDataLoadIter, split='val')
         if stage == 'test' or stage is None:
-            self.test_iter = self.build_dataset(self.test_kwargs, ValDataLoadIter)
+            self.test_iter = self.build_dataset(self.test_kwargs, ValDataLoadIter, split='test')
 
     def train_dataloader(self):
         return self.train_iter

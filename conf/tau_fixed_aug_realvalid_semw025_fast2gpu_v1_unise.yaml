@@ -1,0 +1,118 @@
+accelerator: gpu
+devices:
+- 0
+- 1
+log_dir: ./logs/tau_fixed_aug_realvalid_semw025_fast2gpu_v1
+checkpoint_dir: ./checkpoints/tau_fixed_aug_realvalid_semw025_fast2gpu_v1
+resume: null
+ckpt_path: ./checkpoints/epoch=20-step=109367.ckpt
+save_top_k: 1
+wandb:
+  use_wandb: true
+  project: unise
+  entity: null
+  repo_name: QuarkAudio-UniSE
+  model_name: unise
+  experiment: tau_fixed_aug_realvalid_semw025_fast2gpu_v1
+  change: fixed_aug_realvalid_semw025_fast2gpu_v1
+  group: null
+  name: null
+  tags:
+  - tau
+  - use_simulation
+  - fixed
+  - aug_v1
+  - real_valid
+  - ablation
+  - full
+  - semantic_w_0.25
+dataset_config:
+  train_kwargs:
+    dataset_type: use_simulation_fixed
+    use_simulation_root: /scratch/work/lil14/USE_simulation
+    pair_manifest: /scratch/work/lil14/data/TAU/simulated/phone_room_enhanced/train/paired.csv
+    batch_size: 16
+    cut_duration:
+    - 5.0
+    - 5.0
+    num_workers: 8
+    prefetch: 8
+    samples_per_epoch: 2304
+    mode: train
+    seed: 20260604
+  val_kwargs:
+    dataset_type: use_simulation_fixed
+    use_simulation_root: /scratch/work/lil14/USE_simulation
+    pair_manifest: /scratch/work/lil14/data/TAU/simulated/phone_room_enhanced/valid/paired.csv
+    batch_size: 4
+    cut_duration:
+    - 5.0
+    - 5.0
+    num_workers: 4
+    prefetch: 4
+    samples_per_epoch: 184
+    mode: validation
+    seed: 20260604
+  test_kwargs:
+    dataset_type: use_simulation_fixed
+    use_simulation_root: /scratch/work/lil14/USE_simulation
+    pair_manifest: /scratch/work/lil14/data/TAU/simulated/phone_room/test/paired.csv
+    batch_size: 1
+    cut_duration: null
+    num_workers: 1
+    prefetch: 1
+    samples_per_epoch: 38
+    mode: test
+    seed: 20260604
+save_enhanced: /scratch/work/lil14/data/TAU/enhanced/unise/tau_fixed_aug_realvalid_semw025_fast2gpu_v1/test
+max_epochs: 80
+validation_interval_steps: 300
+wandb_log_interval_steps: 25
+avqi_validation_interval_steps: 1000
+avqi_validation_script: /scratch/work/lil14/use_simulation_pipeline/scripts/validation_avqi_gap.py
+checkpoint_interval_steps: 1000
+gradient_clip_val: 5.0
+valid_pesq_max_batches: 4
+pesq_invalid_manifest: /scratch/work/lil14/data/TAU/simulated/phone_room/pesq_invalid_samples.jsonl
+opt:
+  lr: 0.0005
+sch:
+  warmup_steps: 1000
+  step_decay: 0.99998
+  min_factor: 0.02
+codec_ckpt_dir: ./pretrained/Spark-TTS-0.5B
+stft_config:
+  hop_length: 320
+  win_length: 640
+  n_fft: 640
+  n_mels: 80
+llm_config:
+  num_tasks: 3
+  task_map:
+    se: 0
+    tse: 1
+    rtse: 2
+  feats_dim: 768
+  llm_base_config:
+    cond_dim: 80
+    global_size: 4096
+    semantic_size: 8192
+    hidden_size: 512
+    num_layers: 12
+    num_attention_heads: 8
+    dropout_p: 0.1
+    max_position_embeddings: 4096
+    label_smoothing: 0.1
+    conformer_params:
+      num_layers: 6
+      dim: 512
+      heads: 8
+      dim_head: 64
+      depthwise_conv_kernel_size: 31
+      ff_mult: 4
+      dropout: 0.1
+      qk_norm: null
+      pe_attn_head: 1
+  global_loss_weight: 1.0
+  semantic_loss_weight: 0.25
+trainable_policy: full

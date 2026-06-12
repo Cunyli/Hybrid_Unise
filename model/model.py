@@ -11,6 +11,7 @@ import soundfile as sf
 import time
 import math
 import random
+from peft import LoraConfig, get_peft_model
 
 from .bicodec import BiCodecTokenizer
 from .llm import LLM_SFT
@@ -30,6 +31,8 @@ class Model(pl.LightningModule):
         self.tokenizer.eval()
         self.tokenizer.requires_grad_(False)
         self.dnn = LLM_SFT(**config['llm_config'])
+        self.apply_lora_config(config.get('lora_config'))
+        self.apply_trainable_policy(config.get('trainable_policy', 'full'))
 
         self.semantic_model = AutoModel.from_pretrained("microsoft/wavlm-base-plus").eval()
         self.semantic_model.requires_grad_(False)
@@ -48,6 +51,46 @@ class Model(pl.LightningModule):
         self.best_guarded_val_loss = float('inf')
 
         # self.automatic_optimization = False
+
+    def apply_lora_config(self, lora_config):
+        if not lora_config or not lora_config.get('enabled', False):
+            return
+        target_modules = list(lora_config.get('target_modules') or [])
+        if not target_modules:
+            raise ValueError("lora_config.target_modules must be non-empty when LoRA is enabled")
+        config = LoraConfig(
+            r=int(lora_config.get('r', 8)),
+            lora_alpha=int(lora_config.get('alpha', 16)),
+            lora_dropout=float(lora_config.get('dropout', 0.05)),
+            bias="none",
+            target_modules=target_modules,
+            task_type=None,
+        )
+        self.dnn = get_peft_model(self.dnn, config)
+
+    def apply_trainable_policy(self, policy):
+        policy = str(policy or 'full')
+        if policy == 'full':
+            self.dnn.requires_grad_(True)
+            return
+        if policy in ('adapter_head', 'adapter_lora'):
+            self.dnn.requires_grad_(False)
+            trainable_prefixes = (
+                'adapter.',
+                'task_embedding.',
+                'enroll_sos_embedding.',
+                'mix_sos_embedding.',
+                'output_head.',
+                'base_model.model.adapter.',
+                'base_model.model.task_embedding.',
+                'base_model.model.enroll_sos_embedding.',
+                'base_model.model.mix_sos_embedding.',
+                'base_model.model.output_head.',
+            )
+            for name, parameter in self.dnn.named_parameters():
+                parameter.requires_grad = name.startswith(trainable_prefixes) or 'lora_' in name
+            return
+        raise ValueError(f"Unknown trainable_policy: {policy}")
 
     def train(self, mode=True):
         super().train(mode)
@@ -142,6 +185,7 @@ class Model(pl.LightningModule):
         
         log_metrics = {
             'train/loss': metrics['loss'],
+            'train/weighted_loss': metrics['weighted_loss'],
             'train/acc': metrics['acc'],
             'train/loss_global': metrics['global_loss'],
             'train/loss_semantic': metrics['semantic_loss'],
@@ -198,10 +242,9 @@ class Model(pl.LightningModule):
             avqi_metrics = self._validation_avqi_metrics()
             gap = avqi_metrics['avqi_gap_to_clean']
             self.latest_avqi_gap_to_clean = gap
-            self._log_metrics_direct({
-                f'val_avqi/{name}': value
-                for name, value in avqi_metrics.items()
-            })
+            avqi_wandb_metrics = self._format_avqi_wandb_metrics(avqi_metrics)
+            self.print(f"AVQI W&B metrics: {', '.join(sorted(avqi_wandb_metrics))}")
+            self._log_metrics_direct(avqi_wandb_metrics)
             self._save_best_avqi_gap_checkpoint(gap)
 
     def _save_best_avqi_gap_checkpoint(self, gap):
@@ -245,7 +288,11 @@ class Model(pl.LightningModule):
             raise ImportError(f'Could not load AVQI validation script: {script_path}')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module.run_validation_avqi_metrics
+        return module.run_validation_avqi_metrics, module.format_wandb_avqi_metrics
+
+    def _format_avqi_wandb_metrics(self, metrics):
+        _, format_wandb_avqi_metrics = self._load_avqi_runner()
+        return format_wandb_avqi_metrics(metrics)
 
     def _validation_avqi_metrics(self):
         self.eval()
@@ -272,7 +319,7 @@ class Model(pl.LightningModule):
             est = self.tokenizer.detokenize(global_ids.unsqueeze(1), semantic_ids).squeeze(1)
             return est.reshape(-1)[:src.size(-1)].cpu().numpy(), 16000
 
-        run_validation_avqi_metrics = self._load_avqi_runner()
+        run_validation_avqi_metrics, _ = self._load_avqi_runner()
         metrics = run_validation_avqi_metrics("unise", self.global_step, enhance_one)
         self.train()
         return metrics
@@ -494,7 +541,10 @@ class Model(pl.LightningModule):
         sf.write('test.wav', wav_rec.squeeze().cpu().numpy(), 16000)
 
     def configure_optimizers(self):
-        opt = torch.optim.AdamW(self.dnn.parameters(), **self.config['opt'])
+        trainable_parameters = [parameter for parameter in self.dnn.parameters() if parameter.requires_grad]
+        if not trainable_parameters:
+            raise ValueError("No trainable dnn parameters. Check trainable_policy.")
+        opt = torch.optim.AdamW(trainable_parameters, **self.config['opt'])
 
         # Actually, the keys 'interval' and 'frequency' will be ignored under manual optimization mode.
         # We just reserve them for the automatic optimization alternative.
