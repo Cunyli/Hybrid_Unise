@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+import torch
 import yaml
 from argparse import ArgumentParser
 from datetime import datetime
@@ -96,6 +97,36 @@ def resolve_resume_path(resume, checkpoint_dir):
     return None
 
 
+def resolve_config_path(path, config_dir):
+    if not path:
+        return None
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        cwd_resolved = resolved
+        config_resolved = Path(config_dir) / resolved
+        resolved = cwd_resolved if cwd_resolved.exists() else config_resolved
+    return resolved
+
+
+def load_initial_model_weights(model, checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    result = model.load_state_dict(state_dict, strict=False)
+    print(f"Initialized model weights from {checkpoint_path}")
+    if result.missing_keys:
+        print(f"Initial checkpoint missing keys: {len(result.missing_keys)}")
+        for key in result.missing_keys[:20]:
+            print(f"  missing: {key}")
+        if len(result.missing_keys) > 20:
+            print(f"  ... {len(result.missing_keys) - 20} more missing keys")
+    if result.unexpected_keys:
+        print(f"Initial checkpoint unexpected keys: {len(result.unexpected_keys)}")
+        for key in result.unexpected_keys[:20]:
+            print(f"  unexpected: {key}")
+        if len(result.unexpected_keys) > 20:
+            print(f"  ... {len(result.unexpected_keys) - 20} more unexpected keys")
+
+
 def infer_dataset_type(config, split):
     return config.get('dataset_config', {}).get(f'{split}_kwargs', {}).get('dataset_type', 'native')
 
@@ -188,6 +219,14 @@ def main(args):
     config['ckpt_dir'] = ckpt_dir
     resume_path = resolve_resume_path(config.get('resume'), checkpoint_dir)
     model = Model(config=config)
+    init_ckpt_path = resolve_config_path(config.get('init_ckpt_path'), config.get('_config_dir', Path(args.config).parent))
+    if init_ckpt_path is not None:
+        if resume_path:
+            print(f"Skipping init_ckpt_path because resume is set: {resume_path}")
+        else:
+            if not init_ckpt_path.is_file():
+                raise FileNotFoundError(f"init_ckpt_path does not exist: {init_ckpt_path}")
+            load_initial_model_weights(model, init_ckpt_path)
     data_module = DataModule(**config['dataset_config'])
     latest_checkpoint_callback = ModelCheckpoint(
         dirpath=ckpt_dir,

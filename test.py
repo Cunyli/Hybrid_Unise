@@ -2,10 +2,28 @@ import argparse
 import sys
 import yaml
 import pytorch_lightning as pl
+import torch
 from pathlib import Path
 
 from model import Model
 from dataloader import DataModule
+
+
+def load_model_weights(model, ckpt_path):
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    result = model.load_state_dict(state_dict, strict=False)
+    print(f"Loaded model weights from {ckpt_path}")
+    if result is None:
+        return
+    if result.missing_keys:
+        print(f"Missing keys: {len(result.missing_keys)}")
+        for key in result.missing_keys[:20]:
+            print(f"  missing: {key}")
+    if result.unexpected_keys:
+        print(f"Unexpected keys: {len(result.unexpected_keys)}")
+        for key in result.unexpected_keys[:20]:
+            print(f"  unexpected: {key}")
 
 
 def main(args):
@@ -23,6 +41,9 @@ def main(args):
     config['stage_init_checkpoint'] = None
     
     model = Model(config=config)
+    ckpt_path = config.get('ckpt_path')
+    if ckpt_path is not None:
+        load_model_weights(model, ckpt_path)
 
     # import ipdb; ipdb.set_trace()
     
@@ -33,7 +54,7 @@ def main(args):
         logger=False,
     )
 
-    trainer.test(model, datamodule=data_module, ckpt_path=config['ckpt_path'])
+    trainer.test(model, datamodule=data_module, ckpt_path=None)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('test model')

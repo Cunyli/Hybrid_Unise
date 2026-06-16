@@ -152,7 +152,7 @@ class Model(pl.LightningModule):
 
     # 重写 load_state_dict: 排除 tokenizer
     def load_state_dict(self, state_dict, strict=True):
-        super().load_state_dict(state_dict, strict=False)
+        return super().load_state_dict(state_dict, strict=False)
     
     def forward(self, batch):
         pass
