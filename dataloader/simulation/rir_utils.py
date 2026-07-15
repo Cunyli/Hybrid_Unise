@@ -15,6 +15,29 @@ def add_reverberation(speech_sample, rir_sample):
     return reverberant_sample[:, : speech_sample.shape[1]]
 
 
+def direct_path_delay(rir_sample):
+    rir_array = np.asarray(rir_sample)
+    if rir_array.size == 0:
+        raise ValueError("RIR must contain at least one sample")
+    if rir_array.ndim == 1:
+        magnitude = np.abs(rir_array)
+    else:
+        magnitude = np.max(np.abs(rir_array.reshape(-1, rir_array.shape[-1])), axis=0)
+    return int(np.argmax(magnitude))
+
+
+def shift_by_delay(audio_sample, delay_samples):
+    audio_array = np.asarray(audio_sample)
+    delay_samples = int(delay_samples)
+    if delay_samples <= 0:
+        return audio_array.copy()
+    shifted = np.zeros_like(audio_array)
+    length = audio_array.shape[-1]
+    if delay_samples < length:
+        shifted[..., delay_samples:] = audio_array[..., : length - delay_samples]
+    return shifted
+
+
 # def estimate_early_rir(rir_sample, early_rir_sec: float = 0.08, fs: int = 48000):
 #     """Estimate the part of RIR corresponding to the early reflections.
 
@@ -170,6 +193,8 @@ def get_rir_start_sample(h, level_ratio=1e-1):
     assert h.ndim == 1
 
     abs_h = np.abs(h)
+    if abs_h.size == 0:
+        raise ValueError("RIR must contain at least one sample")
     max_index = np.argmax(abs_h)
     max_abs_value = abs_h[max_index]
     # +1 because python excludes the last value
@@ -178,5 +203,8 @@ def get_rir_start_sample(h, level_ratio=1e-1):
 
     # Finds first occurrence of max
     rir_start_sample = np.argmax(larger_than_threshold)
-    rir_end_sample = np.argmax(smaller_than_threshold) + max_index + 1
+    if smaller_than_threshold.size == 0 or not smaller_than_threshold.any():
+        rir_end_sample = h.shape[0]
+    else:
+        rir_end_sample = np.argmax(smaller_than_threshold) + max_index + 1
     return rir_start_sample, rir_end_sample

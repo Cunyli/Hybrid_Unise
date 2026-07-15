@@ -198,10 +198,7 @@ class Model(pl.LightningModule):
             avqi_metrics = self._validation_avqi_metrics()
             gap = avqi_metrics['avqi_gap_to_clean']
             self.latest_avqi_gap_to_clean = gap
-            self._log_metrics_direct({
-                f'val_avqi/{name}': value
-                for name, value in avqi_metrics.items()
-            })
+            self._log_metrics_direct(self._format_avqi_wandb_metrics(avqi_metrics))
             self._save_best_avqi_gap_checkpoint(gap)
 
     def _save_best_avqi_gap_checkpoint(self, gap):
@@ -245,7 +242,11 @@ class Model(pl.LightningModule):
             raise ImportError(f'Could not load AVQI validation script: {script_path}')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module.run_validation_avqi_metrics
+        return module.run_validation_avqi_metrics, module.format_wandb_avqi_metrics
+
+    def _format_avqi_wandb_metrics(self, metrics):
+        _, format_wandb_avqi_metrics = self._load_avqi_runner()
+        return format_wandb_avqi_metrics(metrics)
 
     def _validation_avqi_metrics(self):
         self.eval()
@@ -272,7 +273,7 @@ class Model(pl.LightningModule):
             est = self.tokenizer.detokenize(global_ids.unsqueeze(1), semantic_ids).squeeze(1)
             return est.reshape(-1)[:src.size(-1)].cpu().numpy(), 16000
 
-        run_validation_avqi_metrics = self._load_avqi_runner()
+        run_validation_avqi_metrics, _ = self._load_avqi_runner()
         metrics = run_validation_avqi_metrics("unise", self.global_step, enhance_one)
         self.train()
         return metrics

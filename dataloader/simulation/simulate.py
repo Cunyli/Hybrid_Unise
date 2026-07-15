@@ -3,7 +3,7 @@ from copy import deepcopy
 import librosa
 import random
 
-from .rir_utils import estimate_early_rir, add_reverberation
+from .rir_utils import direct_path_delay, estimate_early_rir, add_reverberation, shift_by_delay
 from .detect_non_silence import detect_non_silence
 
 
@@ -129,9 +129,9 @@ def simulate_data(mode, speech, interf, noise, rir, fs, config, py_rng=None, rng
     py_rng = py_rng if py_rng is not None else random
     rng = rng if rng is not None else np.random
     # for interference
-    if mode == 'tse' or mode == 'rtse':  # 启用TSE/rTSE模式
+    if mode == 'tse' or mode == 'rtse':  # TSE mode
         sir = py_rng.uniform(*config['tse_interference']['sir'])
-    else:  # SE模式
+    else:  # SE mode
         sir = py_rng.uniform(*config['se_interference']['sir'])
     # for additive noise
     snr = py_rng.uniform(*config['noise']['snr'])
@@ -152,17 +152,28 @@ def simulate_data(mode, speech, interf, noise, rir, fs, config, py_rng=None, rng
     else:
         noisy = deepcopy(speech)
 
+    target_config = config.get("target", {})
+    reverb_target_mode = target_config.get("reverb_mode", "shifted_anechoic")
+    if reverb_target_mode not in {"early_rir", "shifted_anechoic"}:
+        raise ValueError(f"Unsupported target.reverb_mode: {reverb_target_mode}")
+
     if py_rng.random() < config['reverberation']['prob'] and rir is not None:
         # print(np.max(rir))
         rir = rir / (np.max(np.abs(rir)) + 1e-5)
         noisy = add_reverberation(noisy, rir)
-        early_rir = estimate_early_rir(rir, fs=fs)
-        speech = add_reverberation(speech, early_rir)
-        if interf is not None:
-            interf = add_reverberation(interf, early_rir)
+        if reverb_target_mode == "shifted_anechoic":
+            delay_samples = direct_path_delay(rir)
+            speech = shift_by_delay(speech, delay_samples)
+            if interf is not None:
+                interf = shift_by_delay(interf, delay_samples)
+        else:
+            early_rir = estimate_early_rir(rir, fs=fs)
+            speech = add_reverberation(speech, early_rir)
+            if interf is not None:
+                interf = add_reverberation(interf, early_rir)
     
     if py_rng.random() < config['noise']['prob']:
-        noisy = mix_noise(noisy, noise, snr=snr, rng=rng)  # 以混响语音计算能量，不改变noisy-clean相对幅度
+        noisy = mix_noise(noisy, noise, snr=snr, rng=rng)  # mix noise to the noisy signal
 
     order_list = [0, 1, 2]
     py_rng.shuffle(order_list)
@@ -183,7 +194,7 @@ def simulate_data(mode, speech, interf, noise, rir, fs, config, py_rng=None, rng
             )
             noisy = packet_loss(noisy, fs, packet_loss_indices, packet_duration_ms)
     
-    # 调整幅度防止削波
+    # normalize the output to avoid clipping
     max_val = max(np.max(np.abs(noisy)), np.max(np.abs(speech)))
     if interf is not None:
         max_val = max(max_val, np.max(np.abs(interf)))
@@ -207,7 +218,7 @@ if __name__ == '__main__':
         if wav.ndim == 1:
             wav = wav[None]  # (1, T)
         else:
-            wav = wav[:1, :]  # 取第0通道
+            wav = wav[:1, :]  # channel 0
         return wav, fs_
 
     with open('/mnt/nas1/project/unified_llm_speech/bicodec_ar_sft_se/conf/simulation_train.yaml', 'r') as f:

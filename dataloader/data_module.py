@@ -962,7 +962,7 @@ class DataModule(pl.LightningDataModule):
         self.test_kwargs = test_kwargs
 
     @staticmethod
-    def build_dataset(kwargs, default_cls):
+    def build_dataset(kwargs, default_cls, split=None):
         dataset_type = kwargs.get('dataset_type')
         dataset_kwargs = {key: value for key, value in kwargs.items() if key != 'dataset_type'}
         if dataset_type in ('use_simulation', 'use_simulation_onthefly'):
@@ -973,16 +973,57 @@ class DataModule(pl.LightningDataModule):
             from .rolling_cache import UseSimulationRollingCacheDataLoadIter
 
             return UseSimulationRollingCacheDataLoadIter(**dataset_kwargs)
+        if dataset_type in ('gap_webdataset', 'gap_unipase_webdataset'):
+            from .gap_webdataset import GapWebDatasetDataLoadIter
+
+            if split in ('val', 'test') and 'mode' not in dataset_kwargs:
+                dataset_kwargs['mode'] = 'test' if split == 'test' else 'validation'
+            elif split == 'train' and 'mode' not in dataset_kwargs:
+                dataset_kwargs['mode'] = 'train'
+            return GapWebDatasetDataLoadIter(**dataset_kwargs)
+        if dataset_type == 'hybrid_unise_webdataset_stream':
+            from .hybrid_webdataset_protocol import HybridUniSEWebDatasetStreamDataLoadIter
+
+            return HybridUniSEWebDatasetStreamDataLoadIter(**dataset_kwargs)
+        if dataset_type == 'hybrid_unise_webdataset_fixed_recipe':
+            from .hybrid_webdataset_protocol import HybridUniSEWebDatasetFixedRecipeDataLoadIter
+
+            if split in ('val', 'test') and 'mode' not in dataset_kwargs:
+                dataset_kwargs['mode'] = 'test' if split == 'test' else 'validation'
+            return HybridUniSEWebDatasetFixedRecipeDataLoadIter(**dataset_kwargs)
         return default_cls(**kwargs)
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            self.train_iter = self.build_dataset(self.train_kwargs, TrainDataLoadIter)
-            self.val_iter = self.build_dataset(self.val_kwargs, TrainDataLoadIter)
+            self.train_iter = self.build_dataset(self.train_kwargs, TrainDataLoadIter, split='train')
+            self.val_iter = self.build_dataset(self.val_kwargs, TrainDataLoadIter, split='val')
         if stage == 'test' or stage is None:
-            self.test_iter = self.build_dataset(self.test_kwargs, ValDataLoadIter)
+            self.test_iter = self.build_dataset(self.test_kwargs, ValDataLoadIter, split='test')
+
+    @staticmethod
+    def _set_iterator_epoch(iterator, epoch):
+        if iterator is None:
+            return
+        if hasattr(iterator, "set_epoch"):
+            iterator.set_epoch(epoch)
+        elif hasattr(iterator, "epoch"):
+            iterator.epoch = int(epoch)
+
+        dataset = getattr(iterator, "dataset", None)
+        if dataset is not None and hasattr(dataset, "set_epoch"):
+            dataset.set_epoch(epoch)
+
+    def _sync_train_epoch_from_trainer(self, trainer=None):
+        trainer = trainer if trainer is not None else getattr(self, "trainer", None)
+        if trainer is None:
+            return
+        current_epoch = getattr(trainer, "current_epoch", None)
+        if current_epoch is None:
+            return
+        self._set_iterator_epoch(getattr(self, "train_iter", None), int(current_epoch))
 
     def train_dataloader(self):
+        self._sync_train_epoch_from_trainer()
         return self.train_iter
 
     def val_dataloader(self):

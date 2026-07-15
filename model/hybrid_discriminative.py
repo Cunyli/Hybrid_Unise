@@ -3,37 +3,64 @@ from torch import nn
 
 
 class TFGridNetBlock(nn.Module):
-    """Lightweight TF-GridNet-style block.
+    """TF-GridNet block with full-band, sub-band, and frame-attention paths.
 
-    This preserves the paper-facing interface and time/frequency recurrent
-    structure. The exact TF-GridNet implementation is an implementation choice
-    because this repository does not contain the original module.
+    The block follows the standard TF-GridNet decomposition used in speech
+    separation/enhancement systems: intra-frame full-band modeling over
+    frequency bins, sub-band temporal modeling over frames, and a cross-frame
+    self-attention path. It keeps this repository's complex-mask interface.
     """
 
-    def __init__(self, channels: int, lstm_hidden: int, dropout: float = 0.0):
+    def __init__(self, channels: int, lstm_hidden: int, attention_heads: int = 4, dropout: float = 0.0):
         super().__init__()
-        self.norm = nn.GroupNorm(1, channels)
-        self.time_rnn = nn.LSTM(channels, lstm_hidden, batch_first=True, bidirectional=True)
-        self.time_proj = nn.Linear(lstm_hidden * 2, channels)
-        self.freq_rnn = nn.LSTM(channels, lstm_hidden, batch_first=True, bidirectional=True)
-        self.freq_proj = nn.Linear(lstm_hidden * 2, channels)
+        if channels % attention_heads != 0:
+            raise ValueError(f"attention_heads={attention_heads} must divide channels={channels}")
+        self.intra_norm = nn.GroupNorm(1, channels)
+        self.intra_rnn = nn.LSTM(channels, lstm_hidden, batch_first=True, bidirectional=True)
+        self.intra_proj = nn.Linear(lstm_hidden * 2, channels)
+
+        self.sub_norm = nn.GroupNorm(1, channels)
+        self.sub_rnn = nn.LSTM(channels, lstm_hidden, batch_first=True, bidirectional=True)
+        self.sub_proj = nn.Linear(lstm_hidden * 2, channels)
+
+        self.attn_norm = nn.GroupNorm(1, channels)
+        self.frame_attn = nn.MultiheadAttention(
+            channels,
+            attention_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.attn_ffn = nn.Sequential(
+            nn.Linear(channels, channels * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(channels * 4, channels),
+        )
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        x = self.norm(x)
         bsz, channels, freqs, frames = x.shape
 
-        time_in = x.permute(0, 2, 3, 1).reshape(bsz * freqs, frames, channels)
-        time_out, _ = self.time_rnn(time_in)
-        time_out = self.time_proj(time_out).reshape(bsz, freqs, frames, channels).permute(0, 3, 1, 2)
-        x = residual + self.dropout(time_out)
+        residual = x
+        intra = self.intra_norm(x)
+        intra = intra.permute(0, 3, 2, 1).reshape(bsz * frames, freqs, channels)
+        intra, _ = self.intra_rnn(intra)
+        intra = self.intra_proj(intra).reshape(bsz, frames, freqs, channels).permute(0, 3, 2, 1)
+        x = residual + self.dropout(intra)
 
         residual = x
-        freq_in = x.permute(0, 3, 2, 1).reshape(bsz * frames, freqs, channels)
-        freq_out, _ = self.freq_rnn(freq_in)
-        freq_out = self.freq_proj(freq_out).reshape(bsz, frames, freqs, channels).permute(0, 3, 2, 1)
-        return residual + self.dropout(freq_out)
+        sub = self.sub_norm(x)
+        sub = sub.permute(0, 2, 3, 1).reshape(bsz * freqs, frames, channels)
+        sub, _ = self.sub_rnn(sub)
+        sub = self.sub_proj(sub).reshape(bsz, freqs, frames, channels).permute(0, 3, 1, 2)
+        x = residual + self.dropout(sub)
+
+        residual = x
+        frame_tokens = self.attn_norm(x).mean(dim=2).transpose(1, 2)
+        attended, _ = self.frame_attn(frame_tokens, frame_tokens, frame_tokens, need_weights=False)
+        attended = attended + self.dropout(self.attn_ffn(attended))
+        attended = attended.transpose(1, 2).unsqueeze(2).expand(-1, -1, freqs, -1)
+        return residual + self.dropout(attended)
 
 
 class DiscriminativeBranch(nn.Module):
@@ -42,6 +69,7 @@ class DiscriminativeBranch(nn.Module):
         embedding: int = 64,
         lstm_hidden: int = 256,
         num_blocks: int = 8,
+        attention_heads: int = 4,
         dropout: float = 0.0,
     ):
         super().__init__()
@@ -50,7 +78,15 @@ class DiscriminativeBranch(nn.Module):
             nn.PReLU(),
         )
         self.blocks = nn.ModuleList(
-            [TFGridNetBlock(embedding, lstm_hidden, dropout=dropout) for _ in range(num_blocks)]
+            [
+                TFGridNetBlock(
+                    embedding,
+                    lstm_hidden,
+                    attention_heads=attention_heads,
+                    dropout=dropout,
+                )
+                for _ in range(num_blocks)
+            ]
         )
         self.mask_head = nn.Conv2d(embedding, 2, kernel_size=1)
 
@@ -63,6 +99,5 @@ class DiscriminativeBranch(nn.Module):
         for block in self.blocks:
             x = block(x)
         mask = torch.tanh(self.mask_head(x))
-        complex_mask = torch.complex(mask[:, 0], mask[:, 1])
+        complex_mask = torch.complex(mask[:, 0].float(), mask[:, 1].float()).to(dtype=degraded_spec.dtype)
         return degraded_spec * complex_mask
-

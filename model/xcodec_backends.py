@@ -63,7 +63,15 @@ class TransformersXCodecFirstRVQ:
         for parameter in self.model.parameters():
             parameter.requires_grad = False
 
+    def _ensure_device(self, device: torch.device) -> None:
+        if self.device == device:
+            return
+        self.device = device
+        self.model.to(self.device)
+        self.model.eval()
+
     def __call__(self, clean_wav_16k: torch.Tensor, sample_rate: int = 16000):
+        self._ensure_device(clean_wav_16k.device)
         wav = clean_wav_16k.to(self.device)
         inputs: dict[str, Any] | torch.Tensor
         if self.processor is not None:
