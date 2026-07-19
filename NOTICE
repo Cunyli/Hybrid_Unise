@@ -1,0 +1,17 @@
+Hybrid-UniSE Engineering Study
+
+This repository is an independent, substantially modified research snapshot
+derived from the Apache-2.0-licensed Alibaba unified-audio / QuarkAudio-UniSE
+codebase:
+
+  https://github.com/alibaba/unified-audio/tree/main/QuarkAudio-UniSE
+
+The public snapshot replaces the upstream model factory and adds a
+paper-inspired hybrid discriminative-generative implementation, configuration,
+documentation, scripts, and tests. It is not an official Alibaba repository or
+an official implementation of the Hybrid-UniSE paper.
+
+No upstream demo audio, architecture images, pretrained model weights,
+checkpoints, datasets, or private experiment artifacts are redistributed here.
+External model assets remain subject to their own licenses; see
+docs/provenance.md.
