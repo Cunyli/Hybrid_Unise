@@ -19,6 +19,13 @@ WANDB_MAX_RUN_NAME_LEN = 256
 WANDB_MAX_GROUP_LEN = 120
 
 
+def configured_seed(config):
+    value = config.get('seed', 3407)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError('seed must be an integer')
+    return value
+
+
 class ChartsWandbLogger(WandbLogger):
     def log_metrics(self, metrics, step=None):
         is_lightning_validation = (
@@ -297,11 +304,10 @@ def build_wandb_logger(config, config_path):
 
 
 def main(args):
-    pl.seed_everything(3407)
-    
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
     config.setdefault('_config_dir', str(Path(args.config).expanduser().resolve().parent))
+    pl.seed_everything(configured_seed(config))
     probe_run_nonce = os.environ.get('HYBRID_PROBE_RUN_NONCE')
     if probe_run_nonce is not None:
         config['_probe_run_nonce'] = probe_run_nonce

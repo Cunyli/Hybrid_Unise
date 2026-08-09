@@ -1,0 +1,340 @@
+schema_version: transition_margin_pair/v1
+pair_id: transition_margin_probe_pair_v1
+required_ancestor_sha: cf88924d56ecb8c53ea45bdf4005300e8a4c07cf
+
+experiment:
+  updates_per_arm: 100
+  arm_order: [control, treatment]
+  trainer_seed: 3407
+  transition_predecessor_margin: 1.0
+  arms:
+    control:
+      transition_predecessor_margin_weight: 0.0
+    treatment:
+      transition_predecessor_margin_weight: 0.25
+
+execution:
+  run_root: runs/transition_margin_probe_pair_v1/outputs
+  log_root: logs/transition_margin_probe_pair_v1
+  checkpoint_root: checkpoints/transition_margin_probe_pair_v1
+  max_seconds_per_arm: 1800
+  max_pair_gpu_seconds: 3600
+  queue_topology_receipt_max_age_seconds: 3600
+
+evaluation:
+  panel_manifest_artifact: healthy_low_panel_manifest
+  baseline_rows_artifact: step200_token_drift_rows
+  oracle_target_field: token_targets
+  panel_rows:
+    - uid: tau_selected_phone_room_00092_V02_cs
+      task: cs
+      tensor_artifact: step200_tensor_00092_v02_cs
+      step200_positional_agreement: 0.012048192771084338
+      step200_first_error_position: 2
+      step200_first_error_predecessor_token: 5
+    - uid: tau_selected_phone_room_00093_V02_sv
+      task: sv
+      tensor_artifact: step200_tensor_00093_v02_sv
+      step200_positional_agreement: 0.013422818791946308
+      step200_first_error_position: 2
+      step200_first_error_predecessor_token: 5
+    - uid: tau_selected_phone_room_00094_V06_cs
+      task: cs
+      tensor_artifact: step200_tensor_00094_v06_cs
+      step200_positional_agreement: 0.015037593984962405
+      step200_first_error_position: 4
+      step200_first_error_predecessor_token: 5
+    - uid: tau_selected_phone_room_00095_V06_sv
+      task: sv
+      tensor_artifact: step200_tensor_00095_v06_sv
+      step200_positional_agreement: 0.013422818791946308
+      step200_first_error_position: 2
+      step200_first_error_predecessor_token: 5
+  blind_listening:
+    listener_id: project_owner_01
+    mapping: sha256_lexicographic
+    mapping_message: "pair_id\\0uid\\0arm"
+    references: [noisy, clean]
+    rating_categories: [attenuation, burst, instability, intelligibility]
+    rating_values: [a_worse, tie, b_worse]
+    max_plays_per_clip: 2
+    fixed_device_and_volume: true
+    loudness_normalization: false
+    unseal_after_rating_receipt: true
+    failure_rule: treatment_worse_in_any_category_on_any_row
+  decision_gates:
+    positional_agreement:
+      overall_absolute_pp_min: 5.0
+      each_cs_sv_absolute_pp_min: 2.0
+    first_error_position:
+      median_token_delta_min: 2
+      rows_later_min: 3
+    transition_predecessor_rate:
+      denominator: all_valid_transition_positions
+      step200_historical:
+        overall: {predecessor_copies: 129, valid_transitions: 296}
+        cs: {predecessor_copies: 127, valid_transitions: 275}
+        sv: {predecessor_copies: 2, valid_transitions: 21}
+      overall_relative_reduction_min: 0.25
+      overall_absolute_pp_reduction_min: 5.0
+      each_cs_sv_worsening_pp_max: 5.0
+    teacher_accuracy:
+      each_cs_sv_drop_pp_max: 2.0
+    teacher_nll:
+      each_cs_sv_increase_max: 0.10
+
+artifacts:
+  - name: source_checkpoint_step200
+    role: source_checkpoint
+    path: /scratch/work/lil14/Hybrid_Unise/checkpoints/hybrid_gen_semvq_k128_a100x1_probe200_stageinit_v1/version_0/latest_epoch=00-step=000200.ckpt
+    sha256: 55e941154e650567572787b0ae4c121a2eed109a3aa30818dcdb4f661956adf6
+    size_bytes: 1436364648
+  - name: semantic_vq_codebook_k128
+    role: model_asset
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semantic_vq_contract_codebook_debug64_20260708_174414/outputs/semantic_vq_contract_codebook_debug64_20260708_174414/semantic_vq_codebook_k128_layer11_standardize_l2.npz
+    sha256: 0b30784e09acfa01178d9181b6a8d152a176295b0168975f944dca324576bc94
+    size_bytes: 400106
+  - name: wavlm_config
+    role: model_asset
+    path: /scratch/work/lil14/Hybrid_Unise/pretrained/wavlm/microsoft_wavlm-base-plus/config.json
+    sha256: fea6df1c2700a3954fc07e70588aecc9055eeb28db2ff57151a2db0d19180ed4
+    size_bytes: 2232
+  - name: wavlm_preprocessor_config
+    role: model_asset
+    path: /scratch/work/lil14/Hybrid_Unise/pretrained/wavlm/microsoft_wavlm-base-plus/preprocessor_config.json
+    sha256: 99272fe8ccfab114b68b478681ea47ee3a1ce62bb788cb92dd6e4f69fb1f1da2
+    size_bytes: 215
+  - name: wavlm_pytorch_model
+    role: model_asset
+    path: /scratch/work/lil14/Hybrid_Unise/pretrained/wavlm/microsoft_wavlm-base-plus/pytorch_model.bin
+    sha256: 3bb273a6ace99408b50cfc81afdbb7ef2de02da2eab0234e18db608ce692fe51
+    size_bytes: 377617425
+  - name: simulation_config
+    role: data_contract
+    path: /scratch/work/lil14/Hybrid_Unise/conf/simulation_train_shifted_anechoic.yaml
+    sha256: a5d9b9566a0d59b25b21e65164d218974eeb8396146fccfdcb81026ab9ae2ef5
+  - name: train_clean_shards
+    role: data_contract
+    path: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/train/clean_shards.jsonl
+    sha256: cf89b90d204956d0d11ac6f0f9eae5248dec9ac3bb96f88139070eb881940d4b
+  - name: train_noise_shards
+    role: data_contract
+    path: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/train/noise_shards.jsonl
+    sha256: e48dc6934cbec2f043fbf060055ac35a5eb1fe803551107576ae37643944537b
+  - name: train_rir_shards
+    role: data_contract
+    path: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/train/rir_shards.jsonl
+    sha256: 434f673e63c47411de66b1811db03049d12f4e4a631154712b0298a98d7f05e8
+  - name: validation_recipes
+    role: data_contract
+    path: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/valid/fixed_recipes.jsonl
+    sha256: 8138b7980ede528ed6a3d6e622cf921ad1d413b038e28f6f52fa3a5ed2ad6fc1
+  - name: test_recipes
+    role: data_contract
+    path: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/test/fixed_recipes.jsonl
+    sha256: 9f9654dd4e078cb111ee2fae0b039893b6ae61094f35fb328b305250555cc8c6
+  - name: healthy_low_panel_manifest
+    role: evaluation_manifest
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semvq_k128_step200_hidden_diag_20260710/outputs/b300_hidden_ablation_free/step_00000200/pair_manifest_used.csv
+    sha256: ca7ae088c47a3bd2027222212b76617d7475a1df70af4b133cbb438ddffdd2ed
+    size_bytes: 1729
+  - name: step200_token_drift_rows
+    role: evaluation_baseline
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semvq_k128_step200_token_drift_20260710/outputs/token_drift_rows.csv
+    sha256: 6e7ed86fa627f7867b9692d886ba606e6ade04c389d3e066544d9d078d367ec5
+    size_bytes: 3553
+  - name: step200_tensor_00092_v02_cs
+    role: evaluation_tensor
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semvq_k128_step200_hidden_diag_20260710/outputs/b300_hidden_ablation_free/step_00000200/tensors/tau_selected_phone_room_00092_V02_cs.pt
+    sha256: af94c714fa5c93a2f234c01c62e27f3f3438b55304aad31545f0baa93c988a5d
+    size_bytes: 1096611
+  - name: step200_tensor_00093_v02_sv
+    role: evaluation_tensor
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semvq_k128_step200_hidden_diag_20260710/outputs/b300_hidden_ablation_free/step_00000200/tensors/tau_selected_phone_room_00093_V02_sv.pt
+    sha256: ef797c97bc20e38d485134f8f61928744232b89ce2df7d63dd0461d488cf7d0d
+    size_bytes: 660131
+  - name: step200_tensor_00094_v06_cs
+    role: evaluation_tensor
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semvq_k128_step200_hidden_diag_20260710/outputs/b300_hidden_ablation_free/step_00000200/tensors/tau_selected_phone_room_00094_V06_cs.pt
+    sha256: 8a04a2c20a0c0a809fade3f060464d9c98c6cf1021195b1706dbabcd5590301d
+    size_bytes: 1170915
+  - name: step200_tensor_00095_v06_sv
+    role: evaluation_tensor
+    path: /scratch/work/lil14/Hybrid_Unise/runs/semvq_k128_step200_hidden_diag_20260710/outputs/b300_hidden_ablation_free/step_00000200/tensors/tau_selected_phone_room_00095_V06_sv.pt
+    sha256: 9ff49cd78aef77d8ab44c1ae3a634386c77943f3823d3ee750989c8a3e982d71
+    size_bytes: 660131
+
+base_config:
+  model_type: hybrid_unise
+  stage: gen
+  seed: 3407
+  accelerator: gpu
+  devices: [0]
+  precision: bf16-mixed
+  float32_matmul_precision: high
+  accumulate_grad_batches: 1
+  max_epochs: 1
+  max_steps: 100
+  val_check_interval: 50
+  validation_interval_steps: 50
+  checkpoint_interval_steps: 50
+  avqi_validation_interval_steps: 0
+  save_avqi_best_checkpoints: false
+  checkpoint_monitor: val/nll
+  checkpoint_mode: min
+  best_checkpoints_to_keep: 1
+  latest_checkpoints_to_keep: 2
+  gradient_clip_val: 5.0
+  log_every_n_steps: 10
+  wandb_log_interval_steps: 10
+  resume: null
+  stage_init_checkpoint: /scratch/work/lil14/Hybrid_Unise/checkpoints/hybrid_gen_semvq_k128_a100x1_probe200_stageinit_v1/version_0/latest_epoch=00-step=000200.ckpt
+  component_init_checkpoints: {}
+  ckpt_path: null
+  gen_train_refinement: false
+  save_intermediates: false
+  fusion_use_teacher_forcing: false
+  wandb:
+    use_wandb: false
+    project: hybrid-unise
+    repo_name: Hybrid_Unise_autofix
+    model_name: hybrid_unise
+    experiment: transition_margin_probe_pair_v1
+    change: transition_predecessor_margin_pair_v1
+    tags:
+      - hybrid
+      - gen
+      - semantic_vq
+      - transition_margin
+      - paired_kill_test
+      - no_wandb
+
+  sfi:
+    window_ms: 20.0
+    hop_ms: 10.0
+    supported_sample_rates: [8000, 16000, 24000, 32000, 48000]
+  discriminative:
+    num_blocks: 8
+    embedding: 64
+    lstm_hidden: 256
+    attention_heads: 4
+    dropout: 0.0
+  wavlm:
+    pretrained_name_or_path: /scratch/work/lil14/Hybrid_Unise/pretrained/wavlm/microsoft_wavlm-base-plus
+    freeze: true
+    use_pretrained: true
+    feature_dim: 768
+    layer_mode: layer
+    layer_index: 11
+  xcodec:
+    target_type: wavlm_kmeans_vq
+    vocab_size: 128
+    codebook_path: /scratch/work/lil14/Hybrid_Unise/runs/semantic_vq_contract_codebook_debug64_20260708_174414/outputs/semantic_vq_contract_codebook_debug64_20260708_174414/semantic_vq_codebook_k128_layer11_standardize_l2.npz
+    wavlm_model_path: /scratch/work/lil14/Hybrid_Unise/pretrained/wavlm/microsoft_wavlm-base-plus
+    sample_rate: 16000
+    layer_index: 11
+    feature_normalization: standardize_l2
+    codec_hop_length: 320
+  lm:
+    architecture: llama
+    num_layers: 12
+    hidden_size: 512
+    num_attention_heads: 8
+    dropout: 0.1
+    max_position_embeddings: 4096
+    label_smoothing: 0.0
+  lm_objective:
+    history_embedding_dropout_prob: 0.0
+    history_corruption_replacement_fraction: 0.0
+    transition_stall_history_corruption: false
+    prefix_only_aux_weight: 0.0
+    transition_ce_multiplier: 1.0
+    normalize_transition_weights_per_sample: false
+    transition_predecessor_margin: 1.0
+  refinement:
+    architecture: paper_dprnn
+    channels: 64
+    hidden: 128
+    num_blocks: 4
+    num_heads: 8
+    dropout: 0.0
+    dprnn_window_length: 640
+    dprnn_hop_length: 320
+  fusion:
+    channels: 32
+  loss_weights:
+    gen:
+      nll: 1.0
+      complex: 0.0
+      mag: 0.0
+      pmsqe: 0.0
+    fusion:
+      mrstft: 1.0
+      l1: 0.5
+      sqa: 0.0
+  external_losses:
+    pmsqe:
+      enabled: false
+      import_path: model.quality_losses:AsteroidPMSQELoss
+    sqa:
+      enabled: false
+      import_path: model.quality_losses:TorchaudioSquimObjectiveLoss
+      kwargs:
+        mode: l1
+        weights: [1.0, 1.0, 0.05]
+  mrstft_loss:
+    fft_sizes: [256, 512, 1024]
+    hop_ratio: 0.25
+  opt:
+    lr: 0.0002
+    weight_decay: 0.01
+  sch:
+    warmup_steps: 20
+    decay: 1.0
+  resampling:
+    backend: linear
+  lm_stft_alignment_mode: raw_cross_attn
+  lm_stft_alignment_tolerance: 2
+  dataset_config:
+    train_kwargs:
+      dataset_type: hybrid_unise_webdataset_stream
+      split_root: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10
+      simulation_config: /scratch/work/lil14/Hybrid_Unise/conf/simulation_train_shifted_anechoic.yaml
+      batch_size: 4
+      cut_duration: [5.0, 5.0]
+      samples_per_epoch: 400
+      target_sample_rate: 16000
+      num_workers: 2
+      prefetch: 2
+      persistent_workers: false
+      clean_shuffle_buffer: 64
+      noise_buffer_size: 32
+      rir_buffer_size: 16
+      shard_interleave_buffer: 4
+      shard_shuffle_seed: 3407
+      tar_cache_size: 8
+      streaming_mode: sequential
+      batch_format: tuple
+      skip_bad_samples: false
+    val_kwargs:
+      dataset_type: hybrid_unise_webdataset_fixed_recipe
+      recipe_manifest: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/valid/fixed_recipes.jsonl
+      simulation_config: /scratch/work/lil14/Hybrid_Unise/conf/simulation_train_shifted_anechoic.yaml
+      batch_size: 1
+      cut_duration: 5.0
+      target_sample_rate: 16000
+      num_workers: 1
+      prefetch: 1
+      batch_format: tuple
+      max_recipes: 12
+    test_kwargs:
+      dataset_type: hybrid_unise_webdataset_fixed_recipe
+      recipe_manifest: /scratch/elec/t412-speechcom/Triton - Symptonic/lijie/gap_webdataset_active/splits/hybrid_unise_v1_stream_80_10_10/test/fixed_recipes.jsonl
+      simulation_config: /scratch/work/lil14/Hybrid_Unise/conf/simulation_train_shifted_anechoic.yaml
+      batch_size: 1
+      cut_duration: 5.0
+      target_sample_rate: 16000
+      num_workers: 1
+      prefetch: 1
+      batch_format: tuple
+      max_recipes: 12

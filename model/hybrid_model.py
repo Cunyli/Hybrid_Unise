@@ -8,7 +8,6 @@ from typing import Any
 import pytorch_lightning as pl
 import soundfile as sf
 import torch
-from torch import nn
 import torch.nn.functional as F
 
 from .audio import SFIConfig, align_length, linear_resample, sfi_istft, sfi_stft
@@ -16,6 +15,10 @@ from .hybrid_discriminative import DiscriminativeBranch
 from .hybrid_fusion import FusionBranch
 from .hybrid_lm import HybridLlamaSemanticLM, HybridSemanticLM, WavLMConditioner
 from .hybrid_losses import MultiResolutionSTFTLoss, build_external_loss, complex_mse, magnitude_mse
+from .hybrid_objective import (
+    lm_objective_identity,
+    validate_checkpoint_lm_objective_identity,
+)
 from .hybrid_refinement import (
     GenerativeRefinementBranch,
     IdentityCenteredPaperDPRNNRefinementBranch,
@@ -279,6 +282,12 @@ class HybridUniSELightning(pl.LightningModule):
             lm_objective = {}
         if not isinstance(lm_objective, dict):
             raise ValueError("lm_objective must be a mapping")
+        (
+            self.lm_objective_config,
+            self.lm_objective_json,
+            self.lm_objective_sha256,
+        ) = lm_objective_identity(lm_objective)
+        lm_objective = self.lm_objective_config
         self.lm_history_embedding_dropout_prob = float(
             lm_objective.get("history_embedding_dropout_prob", 0.0)
         )
@@ -1236,6 +1245,7 @@ class HybridUniSELightning(pl.LightningModule):
             if parameter.requires_grad and parameter.grad is not None:
                 grad_norm_sq += parameter.grad.detach().float().norm(2).pow(2)
         grad_norm = grad_norm_sq.sqrt()
+        _require_finite("train/grad_norm", grad_norm)
         self._latest_grad_norm = float(grad_norm.detach().cpu())
 
     def validation_step(self, batch, batch_idx):
@@ -1393,6 +1403,8 @@ class HybridUniSELightning(pl.LightningModule):
     def on_save_checkpoint(self, checkpoint):
         checkpoint["hybrid_stage"] = self.stage
         checkpoint["hybrid_architecture_config"] = self.architecture_config
+        checkpoint["hybrid_lm_objective_json"] = self.lm_objective_json
+        checkpoint["hybrid_lm_objective_sha256"] = self.lm_objective_sha256
         checkpoint["latest_avqi_gap_to_clean"] = self._latest_avqi_gap_to_clean
         checkpoint["latest_avqi_metrics"] = self._latest_avqi_metrics
         checkpoint["best_avqi_gap_abs_to_clean"] = self._best_avqi_gap_abs_to_clean
@@ -1408,6 +1420,11 @@ class HybridUniSELightning(pl.LightningModule):
     def on_load_checkpoint(self, checkpoint):
         validate_hybrid_checkpoint_metadata(checkpoint, self.stage)
         validate_hybrid_architecture_metadata(checkpoint, self.architecture_config)
+        validate_checkpoint_lm_objective_identity(
+            checkpoint,
+            self.lm_objective_json,
+            self.lm_objective_sha256,
+        )
         self._latest_avqi_gap_to_clean = checkpoint.get("latest_avqi_gap_to_clean")
         self._latest_avqi_metrics = checkpoint.get("latest_avqi_metrics")
         self._best_avqi_gap_abs_to_clean = float(checkpoint.get("best_avqi_gap_abs_to_clean", float("inf")))

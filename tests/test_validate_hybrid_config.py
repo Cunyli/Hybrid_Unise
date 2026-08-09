@@ -1,4 +1,10 @@
-from scripts.validate_hybrid_config import validate_config
+from model.hybrid_objective import (
+    LM_OBJECTIVE_ALLOWED_KEYS as RUNTIME_LM_OBJECTIVE_ALLOWED_KEYS,
+)
+from scripts.validate_hybrid_config import (
+    LM_OBJECTIVE_ALLOWED_KEYS as VALIDATOR_LM_OBJECTIVE_ALLOWED_KEYS,
+    validate_config,
+)
 
 
 def base_config():
@@ -36,6 +42,13 @@ def base_config():
     }
 
 
+def test_lm_objective_allowlists_match_runtime():
+    assert (
+        VALIDATOR_LM_OBJECTIVE_ALLOWED_KEYS
+        == RUNTIME_LM_OBJECTIVE_ALLOWED_KEYS
+    )
+
+
 def test_validate_hybrid_config_accepts_minimal_valid_config(tmp_path):
     assert validate_config(base_config(), tmp_path / "valid.yaml") == []
 
@@ -67,6 +80,36 @@ def test_validate_hybrid_config_rejects_non_mapping_lm_objective(tmp_path):
     errors = validate_config(config, tmp_path / "invalid.yaml")
 
     assert "lm_objective must be a mapping" in errors
+
+
+def test_validate_hybrid_config_rejects_unknown_lm_objective_key(tmp_path):
+    config = base_config()
+    config["lm_objective"] = {
+        "transition_predecessor_margin_weigth": 0.25,
+    }
+
+    errors = validate_config(config, tmp_path / "invalid.yaml")
+
+    assert any(
+        "lm_objective contains unsupported keys" in error
+        and "transition_predecessor_margin_weigth" in error
+        for error in errors
+    )
+
+
+def test_validate_hybrid_config_can_skip_only_external_path_checks(tmp_path):
+    config = base_config()
+    config["stage_init_checkpoint"] = str(tmp_path / "missing.ckpt")
+
+    checked_errors = validate_config(config, tmp_path / "checked.yaml")
+    static_errors = validate_config(
+        config,
+        tmp_path / "static.yaml",
+        check_external_paths=False,
+    )
+
+    assert any("stage_init_checkpoint does not exist" in error for error in checked_errors)
+    assert static_errors == []
 
 
 def test_validate_hybrid_config_rejects_invalid_lm_objective_values(tmp_path):

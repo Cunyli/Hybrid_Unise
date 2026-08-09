@@ -7,6 +7,16 @@ import yaml
 
 VALID_STAGES = {"disc", "gen", "fusion", "joint"}
 VALID_COMPONENT_INIT_KEYS = {"discriminative", "disc", "generative", "gen", "fusion"}
+LM_OBJECTIVE_ALLOWED_KEYS = {
+    "history_embedding_dropout_prob",
+    "history_corruption_replacement_fraction",
+    "transition_stall_history_corruption",
+    "prefix_only_aux_weight",
+    "transition_ce_multiplier",
+    "normalize_transition_weights_per_sample",
+    "transition_predecessor_margin",
+    "transition_predecessor_margin_weight",
+}
 
 
 def require(condition: bool, message: str, errors: list[str]) -> None:
@@ -33,7 +43,12 @@ def resolve_config_path(value, config_dir: Path) -> Path:
     return path
 
 
-def validate_config(config: dict, path: Path) -> list[str]:
+def validate_config(
+    config: dict,
+    path: Path,
+    *,
+    check_external_paths: bool = True,
+) -> list[str]:
     errors: list[str] = []
     config_dir = Path(config.get("_config_dir", path.parent)).expanduser()
     require(config.get("model_type") == "hybrid_unise", "model_type must be hybrid_unise", errors)
@@ -83,7 +98,7 @@ def validate_config(config: dict, path: Path) -> list[str]:
             stage_init_dir = config.get("stage_init_checkpoint_dir")
             if not stage_init_dir:
                 errors.append("stage_init_checkpoint_dir is required when stage_init_checkpoint is 'auto'")
-            else:
+            elif check_external_paths:
                 stage_init_root = resolve_config_path(stage_init_dir, config_dir)
                 if not stage_init_root.exists():
                     errors.append(f"stage_init_checkpoint_dir does not exist: {stage_init_dir!r}")
@@ -101,7 +116,7 @@ def validate_config(config: dict, path: Path) -> list[str]:
             errors.append(f"stage_init_checkpoint still contains placeholder path {stage_init_checkpoint!r}")
         else:
             stage_init_path = resolve_config_path(stage_init_checkpoint, config_dir)
-            if not stage_init_path.is_file():
+            if check_external_paths and not stage_init_path.is_file():
                 errors.append(f"stage_init_checkpoint does not exist: {stage_init_checkpoint!r}")
     for component, checkpoint in component_init_checkpoints.items():
         if component not in VALID_COMPONENT_INIT_KEYS:
@@ -111,7 +126,7 @@ def validate_config(config: dict, path: Path) -> list[str]:
             )
             continue
         checkpoint_path = resolve_config_path(checkpoint, config_dir)
-        if not checkpoint_path.is_file():
+        if check_external_paths and not checkpoint_path.is_file():
             errors.append(f"component_init_checkpoints.{component} does not exist: {checkpoint!r}")
 
     sfi = config.get("sfi") or {}
@@ -197,6 +212,15 @@ def validate_config(config: dict, path: Path) -> list[str]:
         lm_objective = {}
     else:
         lm_objective = lm_objective_value
+        unknown_lm_objective_keys = sorted(
+            set(lm_objective) - LM_OBJECTIVE_ALLOWED_KEYS
+        )
+        if unknown_lm_objective_keys:
+            errors.append(
+                "lm_objective contains unsupported keys "
+                f"{unknown_lm_objective_keys}; expected only "
+                f"{sorted(LM_OBJECTIVE_ALLOWED_KEYS)}"
+            )
     history_dropout = finite_float(
         lm_objective.get("history_embedding_dropout_prob", 0.0)
     )

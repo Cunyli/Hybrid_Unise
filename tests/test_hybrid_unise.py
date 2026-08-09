@@ -1,4 +1,6 @@
+import hashlib
 import io
+import json
 import math
 import random
 import tarfile
@@ -570,6 +572,21 @@ def test_semantic_loss_metrics_normalized_objective_has_finite_gradients():
     assert logits.grad is not None
     assert torch.isfinite(logits.grad).all()
     assert torch.equal(logits.grad[1, 2:], torch.zeros_like(logits.grad[1, 2:]))
+
+
+def test_optimizer_step_rejects_nonfinite_gradient_norm():
+    model = HybridUniSELightning(tiny_hybrid_config("gen"))
+    parameter = next(
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    )
+    parameter.grad = torch.full_like(parameter, float("inf"))
+
+    try:
+        model.on_before_optimizer_step(None)
+    except FloatingPointError as exc:
+        assert "train/grad_norm contains NaN/Inf" in str(exc)
+    else:
+        raise AssertionError("non-finite gradients must fail before optimizer step")
 
 
 def test_semantic_loss_metrics_normalization_is_exactly_legacy_when_disabled_or_unit_weight():
@@ -1277,6 +1294,103 @@ def test_hybrid_model_rejects_invalid_transition_predecessor_margin_values():
                 assert field in str(exc)
             else:
                 raise AssertionError(f"Invalid {field}={value!r} should fail fast")
+
+
+def test_hybrid_model_rejects_unknown_lm_objective_key():
+    config = tiny_hybrid_config(
+        "gen",
+        lm_objective={"transition_predecessor_margin_weigth": 0.25},
+    )
+
+    try:
+        HybridUniSELightning(config)
+    except ValueError as exc:
+        assert "lm_objective contains unsupported keys" in str(exc)
+        assert "transition_predecessor_margin_weigth" in str(exc)
+    else:
+        raise AssertionError("unknown lm_objective key should fail")
+
+
+def test_hybrid_checkpoint_binds_canonical_lm_objective_identity():
+    control = HybridUniSELightning(
+        tiny_hybrid_config(
+            "gen",
+            lm_objective={
+                "transition_predecessor_margin": 1.0,
+                "transition_predecessor_margin_weight": 0.0,
+            },
+        )
+    )
+    checkpoint = {}
+    control.on_save_checkpoint(checkpoint)
+
+    assert checkpoint["hybrid_lm_objective_json"] == control.lm_objective_json
+    assert (
+        checkpoint["hybrid_lm_objective_sha256"]
+        == control.lm_objective_sha256
+    )
+    control.on_load_checkpoint(checkpoint)
+
+    treatment = HybridUniSELightning(
+        tiny_hybrid_config(
+            "gen",
+            lm_objective={
+                "transition_predecessor_margin": 1.0,
+                "transition_predecessor_margin_weight": 0.25,
+            },
+        )
+    )
+    try:
+        treatment.on_load_checkpoint(checkpoint)
+    except ValueError as exc:
+        assert "LM objective does not match" in str(exc)
+    else:
+        raise AssertionError("objective-mismatched resume checkpoint should fail")
+
+
+def test_hybrid_resume_rejects_legacy_checkpoint_without_objective_identity():
+    model = HybridUniSELightning(tiny_hybrid_config("gen"))
+    checkpoint = {}
+    model.on_save_checkpoint(checkpoint)
+    checkpoint.pop("hybrid_lm_objective_json")
+    checkpoint.pop("hybrid_lm_objective_sha256")
+
+    try:
+        model.on_load_checkpoint(checkpoint)
+    except ValueError as exc:
+        assert "LM objective metadata is missing" in str(exc)
+        assert "stage initialization" in str(exc)
+    else:
+        raise AssertionError("metadata-less objective resume should fail")
+
+
+def test_hybrid_resume_rejects_partial_or_noncanonical_objective_identity():
+    model = HybridUniSELightning(tiny_hybrid_config("gen"))
+    checkpoint = {}
+    model.on_save_checkpoint(checkpoint)
+
+    partial = dict(checkpoint)
+    partial.pop("hybrid_lm_objective_sha256")
+    try:
+        model.on_load_checkpoint(partial)
+    except ValueError as exc:
+        assert "metadata is incomplete" in str(exc)
+    else:
+        raise AssertionError("partial objective metadata should fail")
+
+    noncanonical = dict(checkpoint)
+    decoded = json.loads(noncanonical["hybrid_lm_objective_json"])
+    noncanonical_json = json.dumps(decoded, indent=2, sort_keys=True)
+    noncanonical["hybrid_lm_objective_json"] = noncanonical_json
+    noncanonical["hybrid_lm_objective_sha256"] = hashlib.sha256(
+        noncanonical_json.encode("utf-8")
+    ).hexdigest()
+    try:
+        model.on_load_checkpoint(noncanonical)
+    except ValueError as exc:
+        assert "JSON/SHA256 metadata is inconsistent" in str(exc)
+    else:
+        raise AssertionError("noncanonical objective metadata should fail")
 
 
 def test_hybrid_model_rejects_invalid_label_smoothing():
