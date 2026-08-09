@@ -11,7 +11,7 @@ RUN_LOG_DIR="${RUN_LOG_DIR:-$ROOT_DIR/logs/slurm}"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-unise}"
 
 case "$TASK" in
-  train|infer|tokenizer_oracle|token_similarity|eval_generation|smoke_sr)
+  train|infer|tokenizer_oracle|token_similarity|eval_generation|smoke_sr|rolling_cache_smoke)
     ;;
   *)
     echo "Unknown TASK: $TASK" >&2
@@ -226,6 +226,113 @@ Path(run_config).write_text(yaml.safe_dump(config, sort_keys=False))
 print("Wrote", run_config)
 PY
     python test.py --config "$RUN_CONFIG" --save_enhanced "$OUTPUT_DIR" 2>&1 | tee -a "$LIVE_LOG"
+    ;;
+
+  rolling_cache_smoke)
+    DRY_DATA_ROOT="${DRY_DATA_ROOT:-/scratch/elec/t412-speechcom/Triton - Symptonic/lijie/dry_data_lake}"
+    USE_SIM_ROOT="${USE_SIM_ROOT:-/scratch/work/lil14/USE_simulation}"
+    SIM_CONFIG="${SIM_CONFIG:-$ROOT_DIR/conf/experiments/unise/use_simulation_phone_room_16k.yaml}"
+    CACHE_DIR="${CACHE_DIR:-$ROOT_DIR/tmp/rolling_cache_smoke}"
+    RUN_ID="${RUN_ID:-rolling_cache_smoke_${SLURM_JOB_ID}}"
+    CACHE_SIZE_GB="${CACHE_SIZE_GB:-0.000001}"
+    SHARD_SIZE_MB="${SHARD_SIZE_MB:-1}"
+    CUT_DURATION="${CUT_DURATION:-0.25}"
+    BATCH_SIZE="${BATCH_SIZE:-1}"
+    NUM_WORKERS="${NUM_WORKERS:-1}"
+    INCLUDE_ARCHIVES="${INCLUDE_ARCHIVES:-1}"
+    MAX_ARCHIVES_TO_INDEX="${MAX_ARCHIVES_TO_INDEX:-16}"
+    MAX_ARCHIVE_MEMBERS_PER_ARCHIVE="${MAX_ARCHIVE_MEMBERS_PER_ARCHIVE:-8}"
+    INCLUDE_CLEAN_ARCHIVES="${INCLUDE_CLEAN_ARCHIVES:-}"
+    INCLUDE_NOISE_ARCHIVES="${INCLUDE_NOISE_ARCHIVES:-0}"
+    INCLUDE_RIR_ARCHIVES="${INCLUDE_RIR_ARCHIVES:-}"
+    INCLUDE_WIND_ARCHIVES="${INCLUDE_WIND_ARCHIVES:-0}"
+    CLEAN_STATUSES="${CLEAN_STATUSES:-}"
+
+    echo "Dry data root: $DRY_DATA_ROOT" | tee -a "$LIVE_LOG"
+    echo "USE simulation root: $USE_SIM_ROOT" | tee -a "$LIVE_LOG"
+    echo "Simulation config: $SIM_CONFIG" | tee -a "$LIVE_LOG"
+    echo "Cache dir: $CACHE_DIR" | tee -a "$LIVE_LOG"
+    echo "Include archives: $INCLUDE_ARCHIVES" | tee -a "$LIVE_LOG"
+    echo "Max archives to index: $MAX_ARCHIVES_TO_INDEX" | tee -a "$LIVE_LOG"
+    echo "Max members per archive: $MAX_ARCHIVE_MEMBERS_PER_ARCHIVE" | tee -a "$LIVE_LOG"
+    if [[ -n "$CLEAN_STATUSES" ]]; then
+      echo "Clean statuses: $CLEAN_STATUSES" | tee -a "$LIVE_LOG"
+    fi
+    python - "$DRY_DATA_ROOT" "$USE_SIM_ROOT" "$SIM_CONFIG" "$CACHE_DIR" "$RUN_ID" "$CACHE_SIZE_GB" "$SHARD_SIZE_MB" "$CUT_DURATION" "$BATCH_SIZE" "$NUM_WORKERS" "$INCLUDE_ARCHIVES" "$MAX_ARCHIVES_TO_INDEX" "$MAX_ARCHIVE_MEMBERS_PER_ARCHIVE" "$CLEAN_STATUSES" "$INCLUDE_CLEAN_ARCHIVES" "$INCLUDE_NOISE_ARCHIVES" "$INCLUDE_RIR_ARCHIVES" "$INCLUDE_WIND_ARCHIVES" <<'PY' 2>&1 | tee -a "$LIVE_LOG"
+import sys
+from pathlib import Path
+
+from dataloader.rolling_cache import UseSimulationRollingCacheDataLoadIter
+
+(
+    dry_data_root,
+    use_sim_root,
+    sim_config,
+    cache_dir,
+    run_id,
+    cache_size_gb,
+    shard_size_mb,
+    cut_duration,
+    batch_size,
+    num_workers,
+    include_archives,
+    max_archives_to_index,
+    max_archive_members_per_archive,
+    clean_statuses,
+    include_clean_archives,
+    include_noise_archives,
+    include_rir_archives,
+    include_wind_archives,
+) = sys.argv[1:]
+
+
+def optional_bool(value):
+    if value == "":
+        return None
+    return value not in {"0", "false", "False", "no", "NO"}
+
+
+clean_statuses = [value for value in clean_statuses.split(",") if value] or None
+dataset = UseSimulationRollingCacheDataLoadIter(
+    dry_data_root=dry_data_root,
+    use_simulation_root=use_sim_root,
+    simulation_config=sim_config,
+    cache_dir=cache_dir,
+    run_id=run_id,
+    cache_size_gb=float(cache_size_gb),
+    shard_size_mb=int(shard_size_mb),
+    cleanup_policy="refresh",
+    include_archives=include_archives not in {"0", "false", "False", "no", "NO"},
+    max_archives_to_index=int(max_archives_to_index),
+    max_archive_members_per_archive=int(max_archive_members_per_archive),
+    clean_statuses=clean_statuses,
+    include_clean_archives=optional_bool(include_clean_archives),
+    include_noise_archives=optional_bool(include_noise_archives) is True,
+    include_rir_archives=optional_bool(include_rir_archives),
+    include_wind_archives=optional_bool(include_wind_archives) is True,
+    batch_size=int(batch_size),
+    cut_duration=[float(cut_duration), float(cut_duration)],
+    num_workers=int(num_workers),
+    samples_per_epoch=max(2, int(batch_size)),
+    mode="train",
+    seed=20260605,
+)
+batch = next(iter(dataset))
+stats_path = Path(dataset.stats_path)
+print("mode", batch[0])
+print("mix_shape", tuple(batch[2].shape))
+print("speech_shape", tuple(batch[3].shape))
+print("fs", batch[5].tolist())
+print("lengths", batch[6].tolist())
+print("names", batch[7])
+print("cache", dataset.cache_run_dir)
+print("stats", stats_path)
+print("noise_items", len(dataset.noise_paths))
+print("rir_items", len(dataset.rir_paths))
+print("clean_stats", dataset.stats_path.read_text())
+print("noise_archive_items", dataset.noise_stats.get("selected_archive_audio"))
+print("rir_archive_items", dataset.rir_stats.get("selected_archive_audio"))
+PY
     ;;
 
 esac

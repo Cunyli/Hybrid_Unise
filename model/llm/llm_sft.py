@@ -1,11 +1,7 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .llm import CustomLlamaModel
 
@@ -13,27 +9,34 @@ from .llm import CustomLlamaModel
 class LLM_SFT(CustomLlamaModel):
     def __init__(
         self,
-        num_tasks: int = 1,  # 任务数量
-        task_map: dict = {
-            'se': 0,
-        },
+        num_tasks: int = 1,  # Number of tasks.
+        task_map: Optional[dict] = None,
         feats_dim: int = 768,
-        llm_base_config: dict= {},
+        global_loss_weight: float = 1.0,
+        semantic_loss_weight: float = 1.0,
+        llm_base_config: Optional[dict] = None,
     ):
-        super().__init__(
-            **llm_base_config
-        )
-        self.task_map = task_map
+        if llm_base_config is None:
+            raise ValueError("llm_base_config is required")
+        llm_base_config = dict(llm_base_config)
+        super().__init__(**llm_base_config)
+        self.task_map = dict(task_map) if task_map is not None else {'se': 0}
+        self.global_loss_weight = float(global_loss_weight)
+        self.semantic_loss_weight = float(semantic_loss_weight)
+        if self.global_loss_weight < 0 or self.semantic_loss_weight < 0:
+            raise ValueError("Loss weights must be non-negative")
+        if self.global_loss_weight + self.semantic_loss_weight == 0:
+            raise ValueError("At least one loss weight must be positive")
 
-        # 任务专属token
+        # Task-specific token.
         self.task_embedding = nn.Embedding(num_tasks, llm_base_config['hidden_size'])
-        # 注册音频sos
+        # Register the audio SOS embedding.
         self.enroll_sos_embedding = nn.Embedding(1, llm_base_config['hidden_size'])
 
         self.adapter = nn.Linear(feats_dim, llm_base_config['hidden_size'])
 
 
-    # 重写forward
+    # Override forward.
     def forward(
         self,
         task_name: str,  # se, tse, rtse
@@ -53,7 +56,7 @@ class LLM_SFT(CustomLlamaModel):
         semantic_sos_token_ids = torch.full((semantic_ids.size(0), 1), self.semantic_sos_token_id, dtype=semantic_ids.dtype, device=semantic_ids.device)
         semantic_eos_token_ids = torch.full((semantic_ids.size(0), 1), self.semantic_eos_token_id, dtype=semantic_ids.dtype, device=semantic_ids.device)
 
-        # 微调时给定mixture，应该让模型预测eos
+        # With mixture conditioning during fine-tuning, the model should predict EOS.
         input_ids = torch.cat([global_sos_token_ids, global_ids, semantic_sos_token_ids, semantic_ids], dim=1)  # (B, 1+32+1+T)
         target_ids = torch.cat([global_ids, semantic_sos_token_ids, semantic_ids, semantic_eos_token_ids], dim=1)  # (B, 32+1+T+1)
 
@@ -77,9 +80,9 @@ class LLM_SFT(CustomLlamaModel):
         else:
             inputs_embeds = torch.cat([task_embeds, mix_sos_embeds, mixture, self.codec_embedding(input_ids)], dim=1)
         
-        # 经过llm
+        # Run the transformer.
         outputs = self.llm_forward(inputs_embeds)
-        hidden_states = outputs.last_hidden_state[:, -target_ids.size(-1):, :]  # 去掉可能的条件部分
+        hidden_states = outputs.last_hidden_state[:, -target_ids.size(-1):, :]  # Remove any conditioning prefix.
 
         logits = self.output_head(hidden_states)  # (B, 1+32+1+T-1, vocab_size)
 
@@ -94,19 +97,27 @@ class LLM_SFT(CustomLlamaModel):
         semantic_logits = logits[:, semantic_start:semantic_end, :]
         semantic_targets = target_ids[:, semantic_start:semantic_end]
 
+        global_loss = self.loss_function(global_logits, global_targets)
+        semantic_loss = self.loss_function(semantic_logits, semantic_targets)
+        weighted_loss = (
+            self.global_loss_weight * global_loss
+            + self.semantic_loss_weight * semantic_loss
+        ) / (self.global_loss_weight + self.semantic_loss_weight)
+
         metrics = {
             'loss': loss,
+            'weighted_loss': weighted_loss,
             'acc': acc,
-            'global_loss': self.loss_function(global_logits, global_targets),
-            'semantic_loss': self.loss_function(semantic_logits, semantic_targets),
+            'global_loss': global_loss,
+            'semantic_loss': semantic_loss,
             'global_acc': (global_logits.argmax(-1) == global_targets).float().mean(),
             'semantic_acc': (semantic_logits.argmax(-1) == semantic_targets).float().mean(),
         }
 
-        return loss, metrics
+        return weighted_loss, metrics
 
 
-    # 重写generate
+    # Override generate.
     def generate(
         self,
         task_name: str,  # se, tse, rtse
@@ -164,7 +175,7 @@ class LLM_SFT(CustomLlamaModel):
             hidden_states = current_output.last_hidden_state  # [batch_size, 1, hidden_size]
             next_token_logits = self.output_head(hidden_states)  # [batch_size, 1, vocab_size]
             
-            # 将非global_token的地方设置为 -float('inf')
+            # Mask all non-global tokens with negative infinity.
             mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
             mask[..., self.global_offset: self.global_offset+self.global_size] = True
             next_token_logits[~mask] = float('-inf')
@@ -193,7 +204,7 @@ class LLM_SFT(CustomLlamaModel):
             hidden_states = current_output.last_hidden_state  # [batch_size, 1, hidden_size]
             next_token_logits = self.output_head(hidden_states)  # [batch_size, 1, vocab_size]
 
-            # 将非semantic_token的地方设置为 -float('inf')
+            # Mask all non-semantic tokens with negative infinity.
             mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
             mask[..., self.semantic_offset: self.semantic_offset + self.semantic_size] = True
             next_token_logits[~mask] = float('-inf')

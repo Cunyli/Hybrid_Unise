@@ -64,7 +64,7 @@ class Model(pl.LightningModule):
         feats = self.semantic_model(wavs, output_hidden_states=True)
         feats_mix = torch.stack(feats.hidden_states, dim=1).mean(1)
 
-        # 指数压缩
+        # Exponential compression.
         # symbol = (feats_mix > 0).float() * 2 - 1
         # magnitude = feats_mix.abs() ** 0.3
         # feats_mix = symbol * magnitude
@@ -99,7 +99,7 @@ class Model(pl.LightningModule):
         mel = torch.log(mel + 1e-10)
         return mel
     
-    # 重写 state_dict: 排除 tokenizer semantic_model
+    # Override state_dict to exclude the tokenizer and semantic model.
     def state_dict(self, *args, **kwargs):
         state = super().state_dict(*args, **kwargs)
         for key in list(state.keys()):
@@ -107,7 +107,7 @@ class Model(pl.LightningModule):
                 del state[key]
         return state
 
-    # 重写 load_state_dict: 排除 tokenizer
+    # Override load_state_dict to exclude the tokenizer.
     def load_state_dict(self, state_dict, strict=True):
         super().load_state_dict(state_dict, strict=False)
     
@@ -403,7 +403,7 @@ class Model(pl.LightningModule):
 
             if 'save_enhanced' in self.config and self.config['save_enhanced'] is not None:
                 sf.write(Path(self.config['save_enhanced']) / f'{names[0]}.wav', est, samplerate=int(fs[0]))
-        elif mode == 'ss':  # 先se，再tse，最后rtse
+        elif mode == 'ss':  # Run SE, then TSE, and finally rTSE.
             seg_len = 5 * 16000
             if src.size(-1) > seg_len:
                 seg_src = src[:, :seg_len]
@@ -509,7 +509,7 @@ class Model(pl.LightningModule):
             warmup_steps = self.config['sch']['warmup_steps']
             step_decay = self.config['sch']['step_decay']
             if step < warmup_steps:
-                # 余弦预热
+                # Cosine warmup.
                 return 0.5 * (1 + math.cos(math.pi * (1 - step / warmup_steps)))
             else:
                 return max(step_decay ** (step - warmup_steps), self.config['sch']['min_factor'])

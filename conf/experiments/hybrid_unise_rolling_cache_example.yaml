@@ -118,7 +118,7 @@ dataset_config:
     dry_data_root: "/scratch/elec/t412-speechcom/Triton - Symptonic/lijie/dry_data_lake"
     use_simulation_root: /scratch/work/lil14/USE_simulation
     # Historical external recipe; this file is not bundled in the repository.
-    simulation_config: ./conf/use_simulation_phone_room_16k.yaml
+    simulation_config: ./conf/experiments/unise/use_simulation_phone_room_16k.yaml
     cache_dir: ./tmp/rolling_cache
     run_id: null
     cache_size_gb: 20

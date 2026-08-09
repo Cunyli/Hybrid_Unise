@@ -139,7 +139,7 @@ class TrainDataLoadIter:
         
         self.speech_scp_base_dir = Path(speech_scp_base_dir)
         self.speech_list = self.load_scp_to_list(speech_scp_path, 'speech')
-        # 按说话人分类
+        # Group recordings by speaker.
         self.spk2speech = collections.defaultdict(list)
         for speech_info in self.speech_list:
             speech_info.path = self.speech_scp_base_dir / speech_info.path
@@ -190,7 +190,7 @@ class TrainDataLoadIter:
         max_tgt_value = np.max(np.abs(tgt)) + 1e-5
         max_src_value = np.max(np.abs(src)) + 1e-5
         max_value = max(max_tgt_value, max_src_value)
-        threshold = high / max_value  # 防止削波
+        threshold = high / max_value  # Prevent clipping.
 
         target_value = py_rng.uniform(low, high)
         factor = min(target_value / max_tgt_value, threshold)
@@ -218,7 +218,7 @@ class TrainDataLoadIter:
         if wav.ndim == 1:
             wav = wav[None]  # (1, T)
         else:
-            wav = wav[:1, :]  # 取第0通道
+            wav = wav[:1, :]  # Keep the first channel.
         return wav, fs_
     
     def load_wav_queue(self, info, fs, q):
@@ -234,7 +234,7 @@ class TrainDataLoadIter:
         thread.start()
         thread.join(timeout)
         if thread.is_alive():
-            raise TimeoutError(f"读取音频文件超时：{info.path}")
+            raise TimeoutError(f"Timed out while reading audio file: {info.path}")
         
         result = result_queue.get()
         if isinstance(result, Exception):
@@ -249,7 +249,7 @@ class TrainDataLoadIter:
 
         speech_info, enroll_info = py_rng.sample(self.spk2speech[spk1], 2)
         interf_info = py_rng.choice(self.spk2speech[spk2])
-        if mode == 'tse' or mode == 'rtse':  # 启用TSE/rTSE模式
+        if mode == 'tse' or mode == 'rtse':  # Enable TSE/rTSE mode.
             try:
                 speech, _ = self.load_wav_with_timeout(speech_info, fs, timeout=2.0)
                 enroll, _ = self.load_wav_with_timeout(enroll_info, fs, timeout=2.0)
@@ -257,7 +257,7 @@ class TrainDataLoadIter:
             except Exception as e:
                 print(e)
                 return self.process_one_sample(sample_index + self.samples_per_epoch, fs, cut_duration, mode, epoch)
-        elif mode == 'se' and py_rng.random() < self.simulation_config['se_interference']['prob']:  # SE模式，启用干扰说话人
+        elif mode == 'se' and py_rng.random() < self.simulation_config['se_interference']['prob']:  # SE with an interfering speaker.
             try:
                 speech, _ = self.load_wav_with_timeout(speech_info, fs, timeout=2.0)
                 enroll = None
@@ -265,7 +265,7 @@ class TrainDataLoadIter:
             except Exception as e:
                 print(e)
                 return self.process_one_sample(sample_index + self.samples_per_epoch, fs, cut_duration, mode, epoch)
-        else:  # SE模式，不启用干扰说话人
+        else:  # SE without an interfering speaker.
             try:
                 speech, _ = self.load_wav_with_timeout(speech_info, fs, timeout=2.0)
                 enroll = None

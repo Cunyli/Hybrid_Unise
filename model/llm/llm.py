@@ -45,7 +45,7 @@ class CustomLlamaModel(nn.Module):
         self.global_size = global_size
         self.semantic_size = semantic_size
 
-        # 指示mixture开始的embedding，不需要id，因为模型不需要输出它
+        # Marks the start of the mixture; no token ID is needed because the model never emits it.
         self.mix_sos_embedding = nn.Embedding(1, hidden_size)
 
         # condition encoder
@@ -53,22 +53,24 @@ class CustomLlamaModel(nn.Module):
         self.cond_encoder = ConformerEncoder(**conformer_params)
         self.cond_output_layer = nn.Linear(conformer_params["dim"], hidden_size)
 
-        # 自定义输入embedding层
+        # Custom input embedding layer.
         self.codec_embedding = nn.Embedding(
             self.vocab_size,
             hidden_size,
         )
         
-        # 获取Llama的transformer层
+        # Reuse the Llama transformer layers.
         config = LlamaConfig(
             vocab_size=self.vocab_size,
             hidden_size=hidden_size,
             num_hidden_layers=num_layers,
             num_attention_heads=num_attention_heads,
+            num_key_value_heads=num_attention_heads,
+            head_dim=hidden_size // num_attention_heads,
             intermediate_size=hidden_size * 4,
             dropout_rate=dropout_p,
             attention_dropout=dropout_p,
-            max_position_embeddings=max_position_embeddings,  # rope的最长序列长度
+            max_position_embeddings=max_position_embeddings,  # Maximum RoPE sequence length.
         )
         self.config = config
         llama_model = LlamaModel(config)
@@ -76,12 +78,43 @@ class CustomLlamaModel(nn.Module):
         self.rotary_emb = llama_model.rotary_emb
         self.norm = llama_model.norm
 
-        self._update_causal_mask = llama_model._update_causal_mask
+        self._update_causal_mask = getattr(llama_model, "_update_causal_mask", None)
         
-        # 自定义输出层
+        # Custom output layer.
         self.output_head = nn.Linear(hidden_size, self.vocab_size, bias=False)  # [hidden_size, vocab_size]
 
         self.label_smoothing = label_smoothing
+
+
+    def _fallback_causal_mask(
+        self,
+        attention_mask: Optional[torch.Tensor],
+        inputs_embeds: torch.Tensor,
+        cache_position: torch.Tensor,
+        past_key_values: Optional[Cache],
+    ) -> torch.Tensor:
+        batch_size, sequence_length = inputs_embeds.shape[:2]
+        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+        target_length = past_seen_tokens + sequence_length
+        min_dtype = torch.finfo(inputs_embeds.dtype).min
+        causal_mask = torch.full(
+            (sequence_length, target_length),
+            fill_value=min_dtype,
+            dtype=inputs_embeds.dtype,
+            device=inputs_embeds.device,
+        )
+        if sequence_length != 1:
+            causal_mask = torch.triu(causal_mask, diagonal=1)
+        causal_mask *= torch.arange(target_length, device=inputs_embeds.device) > cache_position.reshape(-1, 1)
+        causal_mask = causal_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
+
+        if attention_mask is not None:
+            causal_mask = causal_mask.clone()
+            mask_length = attention_mask.shape[-1]
+            padding_mask = causal_mask[:, :, :, :mask_length] + attention_mask[:, None, None, :].to(causal_mask.device)
+            padding_mask = padding_mask == 0
+            causal_mask[:, :, :, :mask_length] = causal_mask[:, :, :, :mask_length].masked_fill(padding_mask, min_dtype)
+        return causal_mask
 
 
     def loss_function(self, logits, target):
@@ -121,8 +154,8 @@ class CustomLlamaModel(nn.Module):
         input_ids = torch.cat([global_sos_token_ids, global_ids, semantic_sos_token_ids, semantic_ids], dim=1)  # (B, 1+32+1+T)
         target_ids = torch.cat([global_ids, semantic_sos_token_ids, semantic_ids, semantic_eos_token_ids], dim=1)  # (B, 32+1+T+1)
 
-        # 预训练时防止对semantic_eos_token_ids进行建模，因为可能导致模型倾向于输出终止token
-        # 并且训练数据可能是从音频中间截断，此时也不应该终止
+        # Do not model semantic EOS during pretraining: truncated audio segments
+        # should not teach the model to emit an early termination token.
         input_ids = input_ids[:, :-1]
         target_ids = target_ids[:, :-1]
 
@@ -135,9 +168,9 @@ class CustomLlamaModel(nn.Module):
         else:
             inputs_embeds = self.codec_embedding(input_ids)  # (B, 1+32+1+T-1, hidden_size)
         
-        # 经过llm
+        # Run the transformer.
         outputs = self.llm_forward(inputs_embeds)
-        hidden_states = outputs.last_hidden_state[:, -target_ids.size(-1):, :]  # 去掉可能的条件部分
+        hidden_states = outputs.last_hidden_state[:, -target_ids.size(-1):, :]  # Remove any conditioning prefix.
         
         logits = self.output_head(hidden_states)  # (B, 1+32+1+T-1, vocab_size)
 
@@ -150,7 +183,7 @@ class CustomLlamaModel(nn.Module):
     def llm_forward(
         self,
         inputs_embeds: Optional[torch.FloatTensor],
-        attention_mask: Optional[torch.Tensor] = None,  # SDPA 不需要指定attention_mask，默认为causal
+        attention_mask: Optional[torch.Tensor] = None,  # SDPA defaults to a causal mask.
         past_key_values: Optional[Cache] = None,
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
@@ -160,11 +193,11 @@ class CustomLlamaModel(nn.Module):
         **flash_attn_kwargs,
     ) -> BaseModelOutputWithPast:
         """
-        模型前向传播
+        Run the transformer forward pass.
         
         Returns:
-            如果use_cache=False: logits [batch_size, seq_len, vocab_size]
-            如果use_cache=True: (logits, past_key_values)
+            If use_cache=False: logits [batch_size, seq_len, vocab_size]
+            If use_cache=True: (logits, past_key_values)
         """
         
         if use_cache and past_key_values is None:
@@ -179,9 +212,12 @@ class CustomLlamaModel(nn.Module):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        )
+        if self._update_causal_mask is not None:
+            causal_mask = self._update_causal_mask(
+                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            )
+        else:
+            causal_mask = self._fallback_causal_mask(attention_mask, inputs_embeds, cache_position, past_key_values)
 
         hidden_states = inputs_embeds
 
@@ -208,9 +244,9 @@ class CustomLlamaModel(nn.Module):
                 **flash_attn_kwargs,
             )
 
-            hidden_states = layer_outputs[0]
+            hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
 
-            if output_attentions:
+            if output_attentions and isinstance(layer_outputs, tuple):
                 all_self_attns += (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
@@ -226,7 +262,7 @@ class CustomLlamaModel(nn.Module):
             attentions=all_self_attns,
         )
 
-    # 此函数仅用作测试QK_Cache
+    # Used only to test the QK cache.
     def test_generate(
         self,
         inputs_embeds: Optional[torch.FloatTensor],
@@ -258,19 +294,19 @@ class CustomLlamaModel(nn.Module):
         top_p: float = 0.95,
         do_sample: bool = True,
     ):  
-        # Top-K 过滤
+        # Top-k filtering.
         if top_k > 0:
             indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
             logits[indices_to_remove] = float('-inf')
         
-        # Top-p (nucleus) 采样
+        # Top-p (nucleus) sampling.
         if top_p < 1.0:
-            sorted_logits, sorted_indices = torch.sort(logits, descending=True)  # 从大到小，默认最后一维
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)  # Descending over the last dimension.
             cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
             
             sorted_indices_to_remove = cumulative_probs > top_p
             sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-            sorted_indices_to_remove[..., 0] = 0  # 使概率刚好超过top_p一个
+            sorted_indices_to_remove[..., 0] = 0  # Keep the first token above the top-p threshold.
             
             indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
             logits[indices_to_remove] = float('-inf')
@@ -278,7 +314,7 @@ class CustomLlamaModel(nn.Module):
         assert 0 < temperature <= 1.0
         logits = logits / temperature
         
-        # 采样或贪婪搜索
+        # Sample or use greedy decoding.
         if do_sample:
             probs = F.softmax(logits, dim=-1)
             next_tokens = torch.multinomial(probs, num_samples=1)  # [batch_size, 1]
@@ -326,7 +362,7 @@ class CustomLlamaModel(nn.Module):
             hidden_states = current_output.last_hidden_state  # [batch_size, 1, hidden_size]
             next_token_logits = self.output_head(hidden_states)  # [batch_size, 1, vocab_size]
             
-            # 将非global_token的地方设置为 -float('inf')
+            # Mask all non-global tokens with negative infinity.
             mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
             mask[..., self.global_offset: self.global_offset+self.global_size] = True
             next_token_logits[~mask] = float('-inf')
@@ -355,7 +391,7 @@ class CustomLlamaModel(nn.Module):
             hidden_states = current_output.last_hidden_state  # [batch_size, 1, hidden_size]
             next_token_logits = self.output_head(hidden_states)  # [batch_size, 1, vocab_size]
 
-            # 将非semantic_token的地方设置为 -float('inf')
+            # Mask all non-semantic tokens with negative infinity.
             mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
             mask[..., self.semantic_offset: self.semantic_offset+self.semantic_size] = True
             next_token_logits[~mask] = float('-inf')
@@ -404,4 +440,3 @@ if __name__=='__main__':
 
     # global_ids, semantic_ids = model.generate(input_ids=None)
     print(sum([p.numel() for p in model.parameters()]))
-

@@ -1,0 +1,59 @@
+# Phone-in-room fixed degradation profile for TAU UniSE experiments.
+# Same degradation choices as the previous phone_room profile, but explicitly
+# targets 16 kHz data for UniSE training/evaluation.
+
+data_cfg:
+  clean_valid_json: data/local_smoke/clean.json
+  degraded_valid_json: data/local_smoke/val_degraded.json
+
+quality_filter:
+  scores: null
+  use_dnsmos_filter: false
+  dnsmos_threshold: 3.0
+  dnsmos_fields: [ovrl, sig, bak, p808]
+  vqscore_threshold: null
+  whitelist: null
+  whitelist_patterns: []
+  missing_scores: fail
+
+degradation_cfg:
+  snr: [10, 15, 20]
+  bandwidth_sr: [8000]
+  bandwidth_type: ["kaiser_best"]
+  lowpass_type: ["butter"]
+  lowpass_order: [4]
+  clipping_min: [0.0, 0.0]
+  clipping_max: [1.0, 1.0]
+  packet_duration: [20]
+  packet_loss_rate: [0.0, 0.0]
+  max_continuous_packet_loss: 1
+  codec:
+    - {format: "ogg", encoder: "opus", qscale: 10}
+  wind_snr: [10]
+  mic_eq_low_shelf_gain_db: [0.0, 0.0]
+  mic_eq_high_shelf_gain_db: [0.0, 0.0]
+  mic_eq_peak_gain_db: [0.0, 0.0]
+  mic_eq_peak_freq: [2000]
+  mic_eq_peak_width_oct: [1.0]
+  agc_threshold_db: [-24.0, -24.0]
+  agc_ratio: [1.0, 1.0]
+  agc_attack_ms: [10.0, 10.0]
+  agc_release_ms: [100.0, 100.0]
+  agc_makeup_gain_db: [0.0, 0.0]
+  adc_bit_depth: [16]
+  adc_lowpass_freq: [10000]
+  adc_highpass_freq: [20]
+  max_degradations: 2
+  noise_prob: 1.0
+  reverb_prob: 1.0
+  mic_eq_prob: 0.0
+  agc_prob: 0.0
+  adc_prob: 0.0
+  bandwidth_prob: 0.0
+  clipping_prob: 0.0
+  packet_loss_prob: 0.0
+  codec_prob: 0.0
+  wind_noise_prob: 0.0
+
+stft_cfg:
+  sampling_rate: 16000
