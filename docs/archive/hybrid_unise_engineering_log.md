@@ -1,14 +1,18 @@
-# Hybrid-UniSE Reproduction Notes
+# Archived Hybrid-UniSE engineering log
 
-This repository now has a separate `model_type: hybrid_unise` path for
-reproducing "A Hybrid Discriminative and Generative System for Universal Speech
+> **Historical document.** This file preserves implementation and environment
+> notes from the development phase. It contains machine-specific paths and old
+> reproduction language; it is not a current paper-exact claim or a Quick Start.
+
+The project added a separate `model_type: hybrid_unise` path inspired by
+"A Hybrid Discriminative and Generative System for Universal Speech
 Enhancement" (arXiv:2601.19113) without replacing the original UniSE/BiCodec
 path.
 
 ## Entry Points
 
-- Training/test config: `conf/hybrid_unise_urgent2026.yaml`
-- Native multi-rate training example: `conf/hybrid_unise_native_multisr_example.yaml`
+- Training/test config: `conf/experiments/hybrid_unise_urgent2026.yaml`
+- Native multi-rate training template: `conf/templates/hybrid_unise_native_multisr_template.yaml`
 - Lightning module: `model/hybrid_model.py`
 - Programmatic inference API: `model/hybrid_inference.py`
 - Directory inference: `scripts/infer_hybrid_directory.py`
@@ -56,7 +60,7 @@ choices in config/code:
 
 ## Stage Training
 
-Set `stage` in `conf/hybrid_unise_urgent2026.yaml`:
+Set `stage` in `conf/experiments/hybrid_unise_urgent2026.yaml`:
 
 - `disc`: trains only the discriminative branch with MR-STFT loss.
 - `gen`: trains WavLM adapter, LM and DPRNN refinement; WavLM encoder and
@@ -83,9 +87,9 @@ the same time.
 The training wrapper can also apply these overrides without editing the YAML:
 
 ```bash
-python scripts/train_hybrid.py --config conf/hybrid_unise_urgent2026.yaml --stage disc
-python scripts/train_hybrid.py --config conf/hybrid_unise_urgent2026.yaml --stage gen --stage_init_checkpoint /path/to/disc.ckpt
-python scripts/train_hybrid.py --config conf/hybrid_unise_urgent2026.yaml --stage fusion --stage_init_checkpoint /path/to/gen.ckpt
+python scripts/train_hybrid.py --config conf/experiments/hybrid_unise_urgent2026.yaml --stage disc
+python scripts/train_hybrid.py --config conf/experiments/hybrid_unise_urgent2026.yaml --stage gen --stage_init_checkpoint /path/to/disc.ckpt
+python scripts/train_hybrid.py --config conf/experiments/hybrid_unise_urgent2026.yaml --stage fusion --stage_init_checkpoint /path/to/gen.ckpt
 ```
 
 ## Data Contract
@@ -123,15 +127,15 @@ runs internally at 16 kHz.
 Train:
 
 ```bash
-python scripts/validate_hybrid_config.py conf/hybrid_unise_urgent2026.yaml
-python scripts/train_hybrid.py --config conf/hybrid_unise_urgent2026.yaml
+python scripts/validate_hybrid_config.py conf/experiments/hybrid_unise_urgent2026.yaml
+python scripts/train_hybrid.py --config conf/experiments/hybrid_unise_urgent2026.yaml
 ```
 
 Test through the Lightning data module:
 
 ```bash
 python scripts/test_hybrid.py \
-  --config conf/hybrid_unise_urgent2026.yaml \
+  --config conf/experiments/hybrid_unise_urgent2026.yaml \
   --stage fusion \
   --ckpt_path /path/to/checkpoint.ckpt \
   --save_enhanced outputs/hybrid_unise_test
@@ -141,7 +145,7 @@ Directory inference:
 
 ```bash
 python scripts/infer_hybrid_directory.py \
-  --config conf/hybrid_unise_urgent2026.yaml \
+  --config conf/experiments/hybrid_unise_urgent2026.yaml \
   --stage fusion \
   --checkpoint /path/to/checkpoint.ckpt \
   --input-root /path/to/noisy \
@@ -174,7 +178,7 @@ No-torch static checks:
 ```bash
 python scripts/check_hybrid_artifacts.py
 python scripts/audit_hybrid_requirements.py
-python scripts/validate_hybrid_config.py conf/hybrid_unise_urgent2026.yaml conf/hybrid_unise_smoke.yaml
+python scripts/validate_hybrid_config.py conf/experiments/hybrid_unise_urgent2026.yaml conf/examples/hybrid_unise_smoke.yaml
 ```
 
 In the current base shell, `pytest` and `torch` are not importable. On this
@@ -200,15 +204,15 @@ A tiny no-dataset smoke path is also available:
 ```bash
 PYTHONPATH=/scratch/work/lil14/.overlays/hybrid_unise_cpu_torch \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-micromamba run -n unise python scripts/validate_hybrid_config.py conf/hybrid_unise_smoke.yaml
+micromamba run -n unise python scripts/validate_hybrid_config.py conf/examples/hybrid_unise_smoke.yaml
 
 PYTHONPATH=/scratch/work/lil14/.overlays/hybrid_unise_cpu_torch \
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-micromamba run -n unise python scripts/smoke_hybrid_forward.py --config conf/hybrid_unise_smoke.yaml
+micromamba run -n unise python scripts/smoke_hybrid_forward.py --config conf/examples/hybrid_unise_smoke.yaml
 ```
 
 The smoke config uses `lm.max_position_embeddings: 256` to keep CPU tests small.
-Use `conf/hybrid_unise_urgent2026.yaml` or raise this value for longer
+Use `conf/experiments/hybrid_unise_urgent2026.yaml` or raise this value for longer
 directory inference runs.
 
 ## Real X-Codec Backend
@@ -326,14 +330,14 @@ Recommended staged command sequence:
 export HYBRID_ENV="PYTHONPATH=/scratch/work/lil14/.overlays/hybrid_unise_cpu_torch OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1"
 
 env $HYBRID_ENV micromamba run -n unise python scripts/train_hybrid.py \
-  --config conf/hybrid_unise_rolling_cache_example.yaml --stage disc
+  --config conf/experiments/hybrid_unise_rolling_cache_example.yaml --stage disc
 
 env $HYBRID_ENV micromamba run -n unise python scripts/train_hybrid.py \
-  --config conf/hybrid_unise_rolling_cache_example.yaml --stage gen \
+  --config conf/experiments/hybrid_unise_rolling_cache_example.yaml --stage gen \
   --stage_init_checkpoint /path/to/disc.ckpt
 
 env $HYBRID_ENV micromamba run -n unise python scripts/train_hybrid.py \
-  --config conf/hybrid_unise_rolling_cache_example.yaml --stage fusion \
+  --config conf/experiments/hybrid_unise_rolling_cache_example.yaml --stage fusion \
   --stage_init_checkpoint /path/to/gen.ckpt
 ```
 
@@ -341,7 +345,7 @@ For test/inference from a trained fusion checkpoint:
 
 ```bash
 env $HYBRID_ENV micromamba run -n unise python scripts/test_hybrid.py \
-  --config conf/hybrid_unise_urgent2026.yaml \
+  --config conf/experiments/hybrid_unise_urgent2026.yaml \
   --stage fusion \
   --ckpt_path /path/to/fusion.ckpt \
   --save_enhanced outputs/hybrid_unise_test

@@ -1,3 +1,7 @@
+# HISTORICAL, MACHINE-BOUND EXPERIMENT CONFIGURATION.
+# Review all data, asset, output, and accelerator settings before reuse.
+# Presence in the repository does not imply that the run succeeded.
+
 accelerator: gpu
 devices: [0]
 

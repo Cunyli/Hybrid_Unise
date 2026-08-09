@@ -1,4 +1,4 @@
-# Example native simulation config for SFI multi-sample-rate training.
+# Native simulation template for SFI multi-sample-rate training.
 # Fill dataset paths before use.
 
 model_type: hybrid_unise
@@ -124,5 +124,5 @@ dataset_config:
     enroll_duration: 5.0
     target_sample_rate: null
     batch_format: dict
-    data_src_dir: ./AudioSamples/SR/noisy
-    data_tgt_dir: ./AudioSamples/SR/clean
+    data_src_dir: ./assets/upstream/audio_samples/SR/noisy
+    data_tgt_dir: ./assets/upstream/audio_samples/SR/clean

@@ -16,27 +16,34 @@ from .hybrid_types import HybridOutput
 
 def load_hybrid_model(
     config_path: Union[str, Path],
-    checkpoint: Union[str, Path, None] = None,
+    checkpoint: Union[str, Path],
     stage: str | None = None,
     device: Union[str, torch.device, None] = None,
 ):
+    if checkpoint is None:
+        raise ValueError(
+            "Hybrid inference requires an explicit trusted checkpoint"
+        )
     with open(config_path, "r") as handle:
         config = yaml.safe_load(handle)
     if config.get("model_type") != "hybrid_unise":
         raise ValueError("Hybrid inference requires a config with model_type: hybrid_unise")
     if stage is not None:
         config["stage"] = stage
-    if checkpoint is not None:
-        config["ckpt_path"] = str(checkpoint)
+    config["ckpt_path"] = str(checkpoint)
     config["stage_init_checkpoint"] = None
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model = HybridUniSELightning(config).to(device)
-    ckpt_path = checkpoint or config.get("ckpt_path")
-    if ckpt_path:
-        checkpoint_data = load_hybrid_checkpoint(ckpt_path, map_location=device)
-        validate_hybrid_checkpoint_metadata(checkpoint_data, model.stage)
-        validate_hybrid_architecture_metadata(checkpoint_data, model.architecture_config)
-        model.load_state_dict(checkpoint_data.get("state_dict", checkpoint_data), strict=False)
+    checkpoint_data = load_hybrid_checkpoint(checkpoint, map_location=device)
+    validate_hybrid_checkpoint_metadata(checkpoint_data, model.stage)
+    validate_hybrid_architecture_metadata(
+        checkpoint_data,
+        model.architecture_config,
+    )
+    model.load_state_dict(
+        checkpoint_data.get("state_dict", checkpoint_data),
+        strict=True,
+    )
     model.eval()
     return model
 
@@ -45,8 +52,8 @@ def load_hybrid_model(
 def enhance(
     wav: torch.Tensor,
     sample_rate: int,
-    checkpoint: Union[str, Path, None] = None,
-    config_path: Union[str, Path] = "conf/hybrid_unise_urgent2026.yaml",
+    checkpoint: Union[str, Path],
+    config_path: Union[str, Path] = "conf/examples/hybrid_unise_example.yaml",
     stage: str | None = None,
     return_intermediates: bool = False,
     device: Union[str, torch.device, None] = None,
@@ -65,8 +72,8 @@ def enhance(
 def enhance_file(
     input_path: Union[str, Path],
     output_path: Union[str, Path],
-    checkpoint: Union[str, Path, None] = None,
-    config_path: Union[str, Path] = "conf/hybrid_unise_urgent2026.yaml",
+    checkpoint: Union[str, Path],
+    config_path: Union[str, Path] = "conf/examples/hybrid_unise_example.yaml",
     stage: str | None = None,
     return_intermediates: bool = False,
     device: Union[str, torch.device, None] = None,

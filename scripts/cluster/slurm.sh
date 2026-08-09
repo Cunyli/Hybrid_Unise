@@ -1,12 +1,29 @@
 #!/bin/bash
+# Historical Triton helper. Outside an allocation this script can submit an
+# sbatch job, so submission requires CONFIRM_SLURM_SUBMIT=1.
 set -euo pipefail
 
-ROOT_DIR="${ROOT_DIR:-/scratch/work/lil14/unified-audio/QuarkAudio-UniSE}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="${ROOT_DIR:-$DEFAULT_ROOT}"
 TASK="${TASK:-${1:-train}}"
 RUN_LOG_DIR="${RUN_LOG_DIR:-$ROOT_DIR/logs/slurm}"
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-unise}"
 
+case "$TASK" in
+  train|infer|tokenizer_oracle|token_similarity|eval_generation|smoke_sr)
+    ;;
+  *)
+    echo "Unknown TASK: $TASK" >&2
+    exit 2
+    ;;
+esac
+
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+  if [[ "${CONFIRM_SLURM_SUBMIT:-0}" != "1" ]]; then
+    echo "Refusing to submit without CONFIRM_SLURM_SUBMIT=1" >&2
+    exit 2
+  fi
   PARTITION="${PARTITION:-gpu-a100-80g}"
   GPU_TYPE="${GPU_TYPE:-a100}"
   GPUS="${GPUS:-1}"
@@ -68,18 +85,18 @@ PY
 
 case "$TASK" in
   train)
-    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/tau_fixed_unise.yaml}"
+    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/experiments/tau_fixed_unise.yaml}"
     export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
     echo "Config: $CONFIG_PATH" | tee -a "$LIVE_LOG"
     python train.py --config "$CONFIG_PATH" 2>&1 | tee -a "$LIVE_LOG"
     ;;
 
   infer)
-    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/tau_fixed_unise.yaml}"
-    OUTPUT_DIR="${OUTPUT_DIR:-/scratch/work/lil14/data/TAU/enhanced/unise/phone_room/test}"
+    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/experiments/tau_fixed_unise.yaml}"
+    OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/outputs/tau_fixed_infer}"
     CKPT_ROOT="${CKPT_ROOT:-$ROOT_DIR/checkpoints/tau_fixed}"
     CKPT_PATH="${CKPT_PATH:-$(best_checkpoint "$CKPT_ROOT")}"
-    PAIR_CSV="${PAIR_CSV:-/scratch/work/lil14/data/TAU/simulated/phone_room/test/paired.csv}"
+    PAIR_CSV="${PAIR_CSV:?Set PAIR_CSV to the fixed-pair manifest}"
     WAV_DIR="$OUTPUT_DIR/wav"
 
     test -f "$CKPT_PATH"
@@ -111,7 +128,7 @@ PY
     ;;
 
   tokenizer_oracle)
-    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/tau_fixed_unise.yaml}"
+    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/experiments/tau_fixed_unise.yaml}"
     SPLIT="${SPLIT:-test}"
     OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/outputs/tokenizer_oracle/tau_fixed/$SPLIT}"
     MAX_BATCHES="${MAX_BATCHES:-0}"
@@ -130,7 +147,7 @@ PY
     ;;
 
   token_similarity)
-    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/tau_fixed_unise.yaml}"
+    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/experiments/tau_fixed_unise.yaml}"
     SPLIT="${SPLIT:-val}"
     OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/outputs/token_similarity/tau_fixed/$SPLIT}"
     MAX_BATCHES="${MAX_BATCHES:-0}"
@@ -147,7 +164,7 @@ PY
     ;;
 
   eval_generation)
-    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/tau_fixed_unise.yaml}"
+    CONFIG_PATH="${CONFIG_PATH:-$ROOT_DIR/conf/experiments/tau_fixed_unise.yaml}"
     SPLIT="${SPLIT:-val}"
     CKPT_PATH="${CKPT_PATH:-$(best_checkpoint "$ROOT_DIR/checkpoints/tau_fixed")}"
     OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/outputs/generation_eval/tau_fixed/$SPLIT}"
@@ -202,8 +219,8 @@ config["dataset_config"]["test_kwargs"] = {
     "mode": "se",
     "data_enroll_dir": None,
     "enroll_duration": 5.0,
-    "data_src_dir": "./AudioSamples/SR/noisy",
-    "data_tgt_dir": "./AudioSamples/SR/clean",
+    "data_src_dir": "./assets/upstream/audio_samples/SR/noisy",
+    "data_tgt_dir": "./assets/upstream/audio_samples/SR/clean",
 }
 Path(run_config).write_text(yaml.safe_dump(config, sort_keys=False))
 print("Wrote", run_config)
@@ -211,10 +228,6 @@ PY
     python test.py --config "$RUN_CONFIG" --save_enhanced "$OUTPUT_DIR" 2>&1 | tee -a "$LIVE_LOG"
     ;;
 
-  *)
-    echo "Unknown TASK: $TASK" | tee -a "$LIVE_LOG"
-    exit 2
-    ;;
 esac
 
 echo "Completed: $(date)" | tee -a "$LIVE_LOG"

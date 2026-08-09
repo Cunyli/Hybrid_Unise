@@ -1,0 +1,87 @@
+# Architecture-scale example for code inspection and compatible checkpoints.
+# No dataset, model weights, or checkpoint is included in this repository.
+# The deterministic token stub keeps the configuration self-contained; it is
+# not a substitute for the paper's tokenizer.
+
+model_type: hybrid_unise
+stage: fusion
+
+accelerator: auto
+devices: [0]
+max_epochs: 100
+val_check_interval: 1000
+gradient_clip_val: 5.0
+log_dir: ./logs/hybrid_unise_example
+checkpoint_dir: ./checkpoints/hybrid_unise_example
+resume: null
+ckpt_path: null
+
+sfi:
+  window_ms: 20.0
+  hop_ms: 10.0
+  supported_sample_rates: [8000, 16000, 24000, 32000, 48000]
+
+discriminative:
+  num_blocks: 8
+  embedding: 64
+  lstm_hidden: 256
+  dropout: 0.0
+
+wavlm:
+  freeze: true
+  use_pretrained: false
+  feature_dim: 768
+  pretrained_name_or_path: microsoft/wavlm-base-plus
+
+xcodec:
+  backend: deterministic_stub
+  model_path: null
+  vocab_size: 1024
+  rvq_axis: -1
+
+lm:
+  num_layers: 12
+  hidden_size: 512
+  num_attention_heads: 8
+  dropout: 0.1
+  max_position_embeddings: 4096
+  label_smoothing: 0.0
+
+refinement:
+  channels: 64
+  hidden: 128
+  num_blocks: 4
+  num_heads: 8
+  dropout: 0.0
+
+fusion:
+  channels: 32
+
+loss_weights:
+  gen:
+    nll: 1.0
+    complex: 0.1
+    mag: 0.9
+    pmsqe: 0.0
+  fusion:
+    mrstft: 1.0
+    l1: 0.5
+    sqa: 0.0
+
+external_losses:
+  pmsqe:
+    enabled: false
+    import_path: null
+  sqa:
+    enabled: false
+    import_path: null
+
+mrstft_loss:
+  fft_sizes: [256, 512, 1024]
+  hop_ratio: 0.25
+
+opt:
+  lr: 2.0e-4
+
+lm_stft_alignment_mode: interpolate
+lm_stft_alignment_tolerance: 2

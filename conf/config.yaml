@@ -101,8 +101,8 @@ dataset_config:
     enroll_duration: 5.0
     # data_src_dir: /LibriMix/Libri2Mix/wav16k/min/test/mix_both
     # data_tgt_dir: /LibriMix/Libri2Mix/wav16k/min/test/mix_both
-    data_src_dir: ./AudioSamples/SR/noisy
-    data_tgt_dir: ./AudioSamples/SR/clean
+    data_src_dir: ./assets/upstream/audio_samples/SR/noisy
+    data_tgt_dir: ./assets/upstream/audio_samples/SR/clean
 
 
 # training config

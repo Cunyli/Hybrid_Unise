@@ -1,3 +1,6 @@
+# ARCHIVED GENERATED CONFIGURATION.
+# Retained for development provenance; not a maintained input.
+
 accelerator: gpu
 devices:
 - 0
@@ -64,8 +67,8 @@ dataset_config:
     mode: se
     data_enroll_dir: null
     enroll_duration: 5.0
-    data_src_dir: ./AudioSamples/SR/noisy
-    data_tgt_dir: ./AudioSamples/SR/clean
+    data_src_dir: ./assets/upstream/audio_samples/SR/noisy
+    data_tgt_dir: ./assets/upstream/audio_samples/SR/clean
 max_epochs: 100
 val_check_interval: 0.5
 gradient_clip_val: 5.0

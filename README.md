@@ -1,201 +1,185 @@
-# UniSE: A Unified Framework for Decoder-only Autoregressive LM-based Speech Enhancement
+# Hybrid-UniSE Research Engineering Repository
 
-<p align="center">
-  <a href="https://arxiv.org/abs/2510.20441">
-    <img src="https://img.shields.io/badge/Paper-ArXiv-red.svg" alt="Paper">
-  </a>
-  <a href="https://huggingface.co/QuarkAudio/QuarkAudio-UniSE/">
-    <img src="https://img.shields.io/badge/Model-Hugging%20Face-yellow.svg" alt="Hugging Face">
-  </a>
-  <a href="https://www.modelscope.cn/models/QuarkAudio/QuarkAudio-UniSE/">
-    <img src="https://img.shields.io/badge/Model-%20%E9%AD%94%E6%90%AD-orange.svg" alt="ModelScope">
-  </a>
-</p>
+> **Status:** complete engineering record prepared for research review. This is
+> not an official implementation, a paper-exact reproduction, or a released
+> speech-enhancement model.
 
-<p align="center">
-  <a href="https://arxiv.org/abs/2510.20441"><img src="QuarkAudio-UniSE.png" width="70%" /></a>
-</p>
+This single repository preserves the full Hybrid-UniSE work carried out in this
+project: the upstream UniSE/BiCodec baseline, the paper-inspired hybrid
+implementation, data pipelines, runnable contracts, experiment configurations,
+tests, and the negative or inconclusive results that determined where the work
+stopped.
 
-🚀 **Key Highlights**:
-- ✅ **Unified & Prompt-Free**: Handles multiple tasks without explicit instruction.
-- ⚙️ **Decoder-only AR-LM Backbone**: Leverages LLM-style autoregressive generation for speech token prediction.
-- 🔄 **End-to-End Compatible**: Integrates WavLM (feature extractor), BiCodec (discrete codec), and LM into one pipeline.
-- 🌍 **Multitask Support**: SR, TSE, SS, and more — all in a single model.
+## Project at a glance
 
-📄 **Paper**: [arXiv:2510.20441](https://arxiv.org/abs/2510.20441)  | 🤗 **Model**: [Hugging Face Spaces](https://huggingface.co/QuarkAudio/QuarkAudio-UniSE/)
+| Area | Current status |
+|---|---|
+| Upstream UniSE/BiCodec baseline | Preserved for provenance and comparison |
+| Hybrid discriminative-generative path | Implemented and covered by engineering tests |
+| Data loaders and staged training entry points | Preserved |
+| Historical experiment configurations | Preserved and clearly marked as machine-bound |
+| Compatible Hybrid checkpoint | Not included |
+| Validated Hybrid enhanced-audio result | Not established |
+| Paper-exact reproduction | Not achieved or claimed |
+| Active variant search / GPU validation | Stopped |
 
----
+The main result is therefore an **auditable engineering study**, not a quality
+claim.
 
-## 📋 Supported Tasks
+## What was implemented
 
-| Task | Full Name | Status | Description |
-|------|-----------|--------|-------------|
-| **SR** | Speech Restoration | ✅ Stable | General-purpose denoising and clarity improvemen (e.g., noise, reverb, packet loss) |
-| **TSE** | Target Speaker Extraction | ✅ Stable | Extract target speaker using reference enrollment audio |
-| **SS** | Speech Separation | ✅ Stable | Separate mixed speakers or sound sources |
-| **AEC** | Acoustic Echo Cancellation | ⏳ Developing | Coming soon in next release |
+The Hybrid path combines two estimates on a shared spectral grid:
 
----
+```mermaid
+flowchart LR
+    X["Degraded waveform"] --> SFI["SFI STFT"]
+    SFI --> D["Discriminative branch"]
+    X --> R["Resample to 16 kHz"]
+    R --> W["WavLM-style conditioner"]
+    W --> LM["Autoregressive semantic LM"]
+    LM --> G["DPRNN-style refinement"]
+    SFI --> G
+    D --> F["Learned spectral fusion mask"]
+    G --> F
+    F --> Y["Enhanced waveform"]
+    C["Clean waveform (training only)"] --> T["Semantic token target"]
+    T --> LM
+```
 
-## 🎯 Quick Start: Run Inference in 3 Minutes
+The repository includes:
 
-### 1. Clone Repository
+- the original decoder-only UniSE/BiCodec path;
+- a multi-sample-rate SFI STFT front end;
+- a TF-GridNet-style discriminative branch;
+- WavLM conditioning and semantic-token interfaces;
+- Transformer and LLaMA-style autoregressive LM paths;
+- DPRNN-style generative refinement;
+- learned complex-spectral fusion;
+- native, fixed-pair, WebDataset, and rolling-cache data routes;
+- staged training, inference, evaluation, and diagnostic scripts;
+- checkpoint architecture and objective-identity guards;
+- focused experiment contracts, including the never-run predecessor-margin
+  treatment package.
+
+Several Hybrid blocks are local implementation choices because the paper and
+available assets do not specify everything required for an exact reconstruction.
+See [Architecture and implementation choices](docs/architecture.md).
+
+## Evidence and outcome
+
+| Question | Evidence retained here | Bounded conclusion |
+|---|---|---|
+| Is the Hybrid route implemented? | Shape, mask, loss, stage, data, and checkpoint tests | The engineering path exists |
+| Did the WavLM-KMeans free-running target work? | Recorded identities and metrics for four frozen step-200 diagnostic samples | Positional agreement was about 1.35%; the sample is too small for a general claim |
+| What happened at the first error? | Positions 2 / 2 / 4 / 2 | All copied the predecessor, but all predecessors were token 5, so the cause is confounded |
+| Did decoding penalties yield a candidate? | Ten screened settings | No setting passed the complete gate |
+| Did the predecessor-margin idea help? | Static implementation and an auditable paired-run contract | No treatment was run; there is no efficacy result |
+| Is final Hybrid audio quality established? | No compatible checkpoint or result manifest | No |
+
+These are limited internal diagnostics, not benchmark results. The exact
+evidence boundary is recorded in [Research status](docs/research-status.md).
+
+## Start here
+
+For a structured review, read in this order:
+
+1. [Architecture and implementation choices](docs/architecture.md)
+2. [Research status and stopped directions](docs/research-status.md)
+3. [Repository provenance](docs/provenance.md)
+4. [Configuration guide](conf/README.md)
+5. [Script guide](scripts/README.md)
+6. [Historical engineering notes](docs/archive/)
+
+## Repository layout
+
+```text
+assets/
+  upstream/                   # inherited demo audio and figure; not Hybrid output
+  archive/                    # retained development diagnostic artifacts
+conf/
+  examples/                   # portable inspection and synthetic smoke configs
+  templates/                  # data-contract templates with explicit placeholders
+  experiments/                # historical, often cluster-bound experiment configs
+  archive/                    # retained generated/obsolete config snapshots
+  generated/                  # ignored runtime-generated configs
+dataloader/                   # native, fixed-pair, WebDataset, and cache loaders
+docs/
+  architecture.md             # current implementation map
+  research-status.md          # verified observations and limitations
+  provenance.md               # upstream and asset boundaries
+  archive/                    # historical implementation/experiment contracts
+model/
+  hybrid_*.py                 # Hybrid-UniSE branches, composition, and objectives
+  audio/                      # SFI STFT and alignment utilities
+  bicodec/                    # preserved upstream BiCodec implementation
+  llm/                        # preserved upstream UniSE LM implementation
+scripts/
+  README.md                   # safe entry-point and risk classification
+  cluster/                    # cluster-specific scripts; may submit Slurm jobs
+  *.py                        # training, evaluation, validation, and diagnostics
+tests/                        # engineering contract tests
+checkpoints/ logs/ outputs/
+pretrained/ runs/ tmp/        # ignored runtime artifact locations
+train.py / test.py            # preserved upstream-compatible entry points
+```
+
+## Local inspection
+
+Python 3.10 is the original project baseline. The environment files describe
+the research setup; they are not a frozen, portable reproduction guarantee.
+
+Install development dependencies only if you want to run the tests:
 
 ```bash
-git clone https://github.com/alibaba/unified-audio.git
-cd QuarkAudio-UniSE
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
-### 2. Create a Conda environment and install dependencies
+The configuration validator does not require a checkpoint:
 
 ```bash
-conda create -n unise python=3.10
-conda activate unise
-pip install -r requirements.txt
+python scripts/validate_hybrid_config.py \
+  conf/examples/hybrid_unise_smoke.yaml \
+  conf/examples/hybrid_unise_example.yaml
 ```
 
-### 3. Download Model Assets
-
-
-UniSE needs the pretrained model assets of BiCodec, please download the files in https://huggingface.co/SparkAudio/Spark-TTS-0.5B and put them into `./pretrained/Spark-TTS-0.5B`.
-After Downloading, the tree should be like this:
-
-```
-./pretrained/Spark-TTS-0.5B
-|-- BiCodec
-|   |-- config.yaml
-|   `-- model.safetensors
-|-- config.yaml
-`-- wav2vec2-large-xlsr-53
-    |-- README.md
-    |-- config.json
-    |-- preprocessor_config.json
-    `-- pytorch_model.bin
-```
-
-### 4. Runtime Layout
-
-Generated and downloaded artifacts are kept separate:
-
-```
-./logs          # TensorBoard, W&B, and Slurm/live logs
-./checkpoints   # training and inference .ckpt files
-./pretrained    # downloaded public model assets
-./outputs       # generated audio or temporary inference outputs
-```
-
-For this aligned setup:
-
-```
-./logs/tau_fixed          # TAU fixed-pair TensorBoard and W&B logs
-./logs/slurm              # Slurm stdout/stderr and live logs
-./checkpoints/tau_fixed   # TAU fine-tuning checkpoints
-```
-
-Here `TAU` refers to the local TAU task/data directory used by the configs, such as `/scratch/work/lil14/data/TAU/...`; it is not a Python package in this repository.
-
-## Scripts
-
-Slurm tasks use one entry point:
+The synthetic smoke path uses random waveforms, random model weights, and a
+deterministic token stub:
 
 ```bash
-bash scripts/slurm.sh train
-bash scripts/slurm.sh infer
-bash scripts/slurm.sh smoke_sr
+python scripts/smoke_hybrid_forward.py \
+  --config conf/examples/hybrid_unise_smoke.yaml \
+  --device cpu
 ```
 
-Useful overrides:
+A passing smoke run demonstrates tensor compatibility and finite outputs only.
+It does not demonstrate speech enhancement.
 
-```bash
-CONFIG_PATH=conf/tau_fixed_unise.yaml bash scripts/slurm.sh train
-CKPT_PATH=checkpoints/tau_fixed/version_2/best_epoch=23-step=000864-valid_loss=7.467.ckpt bash scripts/slurm.sh infer
-```
+## Operational boundaries
 
-Directory inference preserves the input folder layout:
+- Files under `conf/experiments/` preserve real experiment intent and may
+  contain cluster-specific absolute paths. They are documentary until adapted
+  to another environment.
+- Files under `scripts/cluster/` are not Quick Start commands. In particular,
+  the Slurm helper can submit a job only after an explicit confirmation gate.
+- `assets/upstream/audio_samples/` and the upstream figure were inherited from
+  QuarkAudio-UniSE. They are references, not outputs of this Hybrid project.
+- Checkpoints, pretrained weights, datasets, and project-produced result audio
+  are not included.
+- No command in this README downloads assets, submits a job, or starts training.
 
-```bash
-INPUT_ROOT=/path/to/noisy OUTPUT_ROOT=/path/to/enhanced bash scripts/infer_directory.sh
-```
+## Provenance and license
 
-## USE Simulation Data
+The codebase began from Alibaba's
+[unified-audio / QuarkAudio-UniSE](https://github.com/alibaba/unified-audio/tree/main/QuarkAudio-UniSE)
+and retains substantial upstream code alongside independent Hybrid-UniSE
+modifications. It is not affiliated with Alibaba and is not an official
+implementation of the referenced Hybrid-UniSE paper.
 
-This repository supports two USE Simulation data modes through `dataset_type`:
+See [NOTICE](NOTICE), [LICENSE](LICENSE), and
+[Repository provenance](docs/provenance.md) for code and asset boundaries.
 
-```yaml
-dataset_type: use_simulation_onthefly
-```
+## Research references
 
-uses online degradation from USE Simulation.
-
-```yaml
-dataset_type: use_simulation_fixed
-```
-
-uses a fixed pair manifest, such as the TAU fixed-pair CSVs in `conf/tau_fixed_unise.yaml`.
-
-## Train
-+ Quick start
-
-```bash
-#!/bin/bash
-python ./train.py --config conf/config.yaml
-```
-
-| Parameter        | Description                                                                                                                                                            |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resume` | if want to resume, specify ckpt path                                                                                                  |
-| `simulation_config` | data simulate config                                                                                                                        |
-| `speech_scp_path`        | SCP of clean audio files                                                       |
-| `noise_scp_path`        | SCP of noise audio files                                                                   
- | `rir_scp_path`        | SCP of rir audio files                                                                       |
-
-
-## Inference
-+ Quick start
-The main inference script is **`test.py`**. The inference process consists of two stages:
-
-1. Extract hidden states from all WavLM layers and obtain a single representation by averaging them across layers.
-2. Use the language model (LM) to predict speech tokens autoregressively, and then decode them into audio using **BiCodec**.
-
-### Running Inference
-+ Quick start
-To run test.py, configure the parameters in `./conf/config.yaml`:
-
-| Parameter        | Description                                                                                                                                                            |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ckpt_path` | pretrained weight                                                                                                             |
-| `enroll_duration` | Number of inference iterations.                                                                                                                                        |
-| `data_src_dir`        | Directory of processed audio files directory.                                                        |
-| `data_tgt_dir`        | Directory of processed audio files directory.                                                                                                                                    |
-| `mode`           | Task type: `se` (Speech Restoration), `tse` (Target Speaker Extraction), `ss` (Speech Separation). |
-
-Command to run inference:
-
-```python
-python test.py
-```
-
-
-## Model Checkpoints
-
-Our pretrained model is available on [Hugging Face](https://huggingface.co/QuarkAudio/QuarkAudio-UniSE/).
-
-
-## Citation
-
-```
-@misc{yan2025uniseunifiedframeworkdecoderonly,
-      title={UniSE: A Unified Framework for Decoder-only Autoregressive LM-based Speech Enhancement}, 
-      author={Haoyin Yan and Chengwei Liu and Shaofei Xue and Xiaotao Liang and Zheng Xue},
-      year={2025},
-      eprint={2510.20441},
-      archivePrefix={arXiv},
-      primaryClass={cs.SD},
-      url={https://arxiv.org/abs/2510.20441}, 
-}
-```
-
-
-## Contact
-For any questions, please contact: `yanhaoyin.yhy@alibaba-inc.com`
- 
+- [A Hybrid Discriminative and Generative System for Universal Speech Enhancement](https://arxiv.org/abs/2601.19113)
+- [UniSE: A Unified Framework for Decoder-only Autoregressive LM-based Speech Enhancement](https://arxiv.org/abs/2510.20441)

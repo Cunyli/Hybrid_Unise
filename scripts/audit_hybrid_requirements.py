@@ -99,7 +99,7 @@ def main() -> int:
             if needle not in text:
                 errors.append(f"{label}: {file_name} missing {needle!r}")
 
-    config_path = Path("conf/hybrid_unise_urgent2026.yaml")
+    config_path = Path("conf/experiments/hybrid_unise_urgent2026.yaml")
     if config_path.is_file():
         config = yaml.safe_load(config_path.read_text())
         expected = {
@@ -110,20 +110,26 @@ def main() -> int:
             if config.get(key) != value:
                 errors.append(f"{config_path}: expected {key}={value!r}")
         if config.get("xcodec", {}).get("backend") == "deterministic_stub":
-            doc_text = Path("docs/hybrid_unise_reproduction.md").read_text()
+            doc_text = Path(
+                "docs/archive/hybrid_unise_engineering_log.md"
+            ).read_text()
             if "not a verified X-Codec model" not in doc_text:
                 errors.append("deterministic_stub is enabled but docs do not warn that it is not verified X-Codec")
         if config.get("external_losses", {}).get("pmsqe", {}).get("enabled"):
             errors.append("PMSQE should not be enabled without verified local backend")
         if config.get("external_losses", {}).get("sqa", {}).get("enabled"):
             errors.append("SQA should not be enabled without verified local backend")
-        rolling_config_path = Path("conf/hybrid_unise_rolling_cache_example.yaml")
+        rolling_config_path = Path(
+            "conf/experiments/hybrid_unise_rolling_cache_example.yaml"
+        )
         if rolling_config_path.is_file():
             rolling_config = yaml.safe_load(rolling_config_path.read_text())
             dataset_type = rolling_config.get("dataset_config", {}).get("train_kwargs", {}).get("dataset_type")
             if dataset_type != "use_simulation_rolling_cache":
                 errors.append(f"{rolling_config_path}: train dataset must use rolling cache")
-        native_config_path = Path("conf/hybrid_unise_native_multisr_example.yaml")
+        native_config_path = Path(
+            "conf/templates/hybrid_unise_native_multisr_template.yaml"
+        )
         if native_config_path.is_file():
             native_config = yaml.safe_load(native_config_path.read_text())
             for split in ("train_kwargs", "val_kwargs"):

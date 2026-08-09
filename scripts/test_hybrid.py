@@ -9,7 +9,10 @@ import yaml
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate then test Hybrid-UniSE")
-    parser.add_argument("--config", default="conf/hybrid_unise_urgent2026.yaml")
+    parser.add_argument(
+        "--config",
+        default="conf/experiments/hybrid_unise_urgent2026.yaml",
+    )
     parser.add_argument("--save_enhanced", default=None)
     parser.add_argument("--ckpt_path", default=None)
     parser.add_argument("--stage", choices=("disc", "gen", "fusion", "joint"), default=None)

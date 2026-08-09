@@ -1,0 +1,21 @@
+Hybrid-UniSE Research Engineering Repository
+
+This repository is an independent, substantially modified research codebase
+derived from the Apache-2.0-licensed Alibaba unified-audio / QuarkAudio-UniSE
+project:
+
+  https://github.com/alibaba/unified-audio/tree/main/QuarkAudio-UniSE
+
+It retains upstream UniSE/BiCodec source code and selected upstream demo assets,
+and adds a paper-inspired Hybrid-UniSE implementation, data paths,
+configuration, diagnostics, experiment contracts, documentation, and tests.
+
+The repository is not affiliated with Alibaba and is not an official
+implementation of either the UniSE or Hybrid-UniSE papers.
+
+Files under assets/upstream/ were inherited from the upstream source tree.
+They are retained only as reference material and must not be presented as
+outputs of this Hybrid-UniSE project.
+
+External model weights and datasets are not included and remain subject to
+their own licenses and terms.

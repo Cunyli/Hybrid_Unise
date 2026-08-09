@@ -31,7 +31,9 @@ from scripts.transition_margin_probe import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = REPO_ROOT / "conf/transition_margin_probe_pair_v1.yaml"
+SPEC_PATH = (
+    REPO_ROOT / "conf/experiments/transition_margin_probe_pair_v1.yaml"
+)
 
 
 def independent_leaf_differences(left, right, prefix=""):

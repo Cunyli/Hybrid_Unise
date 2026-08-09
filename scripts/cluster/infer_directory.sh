@@ -1,9 +1,12 @@
 #!/bin/bash
+# Historical cluster-oriented upstream inference helper.
 set -euo pipefail
 
-ROOT_DIR="${ROOT_DIR:-/scratch/work/lil14/unified-audio/QuarkAudio-UniSE}"
-INPUT_ROOT="${INPUT_ROOT:-/scratch/work/lil14/data/TAU_SD_degraded}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/scratch/work/lil14/data/TAU_SD_enhanced/unise}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="${ROOT_DIR:-$DEFAULT_ROOT}"
+INPUT_ROOT="${INPUT_ROOT:?Set INPUT_ROOT to a directory of degraded audio}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$ROOT_DIR/outputs/legacy_directory_infer}"
 WORK_DIR="${WORK_DIR:-$ROOT_DIR/outputs/tau_sd_work}"
 FLAT_INPUT="${FLAT_INPUT:-$WORK_DIR/input_flat}"
 FLAT_OUTPUT="${FLAT_OUTPUT:-$WORK_DIR/output_flat}"

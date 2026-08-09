@@ -1,3 +1,7 @@
+# STATIC-ONLY, NEVER-SUBMITTED PAIRED PROBE CONTRACT.
+# This preserves a bounded control/treatment design; it is not an efficacy
+# result and must not be treated as an active launch request.
+
 schema_version: transition_margin_pair/v1
 pair_id: transition_margin_probe_pair_v1
 required_ancestor_sha: cf88924d56ecb8c53ea45bdf4005300e8a4c07cf
@@ -197,7 +201,7 @@ base_config:
   wandb:
     use_wandb: false
     project: hybrid-unise
-    repo_name: Hybrid_Unise_autofix
+    repo_name: Hybrid_Unise
     model_name: hybrid_unise
     experiment: transition_margin_probe_pair_v1
     change: transition_predecessor_margin_pair_v1

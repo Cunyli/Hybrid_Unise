@@ -1,5 +1,9 @@
 # Transition-predecessor-margin paired kill test v1
 
+> **Archived static contract; no GPU run occurred.** The current project stops
+> before submission. The launch conditions below are retained for auditability
+> and are not active authorization to resume this experiment.
+
 ## Decision boundary
 
 This test answers only one question: does a fixed predecessor-margin auxiliary
@@ -21,7 +25,7 @@ The Phase A command is non-training:
 
 ```bash
 python -m scripts.transition_margin_probe prepare \
-  --spec conf/transition_margin_probe_pair_v1.yaml \
+  --spec conf/experiments/transition_margin_probe_pair_v1.yaml \
   --output-dir /tmp/transition_margin_probe_pair_v1
 ```
 
@@ -56,7 +60,7 @@ conservative one-shot value, not a tuned optimum or a claimed bound relative
 to the differently reduced CE gradient.
 
 The complete immutable paths and SHA256 values are in
-`conf/transition_margin_probe_pair_v1.yaml`. Preparation must produce
+`conf/experiments/transition_margin_probe_pair_v1.yaml`. Preparation must produce
 preflight, launch, and result receipts that all bind the canonical objective
 JSON/SHA for both arms.
 

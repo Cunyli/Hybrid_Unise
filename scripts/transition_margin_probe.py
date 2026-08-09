@@ -26,7 +26,9 @@ from scripts.validate_hybrid_config import validate_config
 SCHEMA_VERSION = "transition_margin_pair/v1"
 TOPOLOGY_SCHEMA_VERSION = "transition_margin_topology/v1"
 ARM_NAMES = ("control", "treatment")
-DEFAULT_SPEC_PATH = Path("conf/transition_margin_probe_pair_v1.yaml")
+DEFAULT_SPEC_PATH = Path(
+    "conf/experiments/transition_margin_probe_pair_v1.yaml"
+)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT_RETURN_CODE = 124
 START_FAILURE_RETURN_CODE = 125

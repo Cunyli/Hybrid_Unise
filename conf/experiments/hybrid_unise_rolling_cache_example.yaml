@@ -1,3 +1,7 @@
+# HISTORICAL, MACHINE-BOUND EXPERIMENT CONFIGURATION.
+# Review all data, asset, output, and accelerator settings before reuse.
+# Presence in the repository does not imply that the run succeeded.
+
 # Hybrid-UniSE training example for compressed dry-data pools with rolling cache.
 # This avoids fully extracting large archives into many inode-heavy wav files.
 
@@ -113,6 +117,7 @@ dataset_config:
     dataset_type: use_simulation_rolling_cache
     dry_data_root: "/scratch/elec/t412-speechcom/Triton - Symptonic/lijie/dry_data_lake"
     use_simulation_root: /scratch/work/lil14/USE_simulation
+    # Historical external recipe; this file is not bundled in the repository.
     simulation_config: ./conf/use_simulation_phone_room_16k.yaml
     cache_dir: ./tmp/rolling_cache
     run_id: null
@@ -156,5 +161,5 @@ dataset_config:
     enroll_duration: 5.0
     target_sample_rate: null
     batch_format: dict
-    data_src_dir: ./AudioSamples/SR/noisy
-    data_tgt_dir: ./AudioSamples/SR/clean
+    data_src_dir: ./assets/upstream/audio_samples/SR/noisy
+    data_tgt_dir: ./assets/upstream/audio_samples/SR/clean

@@ -9,7 +9,10 @@ import yaml
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate then train Hybrid-UniSE")
-    parser.add_argument("--config", default="conf/hybrid_unise_urgent2026.yaml")
+    parser.add_argument(
+        "--config",
+        default="conf/experiments/hybrid_unise_urgent2026.yaml",
+    )
     parser.add_argument("--stage", choices=("disc", "gen", "fusion", "joint"), default=None)
     parser.add_argument("--stage_init_checkpoint", default=None)
     parser.add_argument("--skip-validation", action="store_true")

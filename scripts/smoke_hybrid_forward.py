@@ -14,7 +14,10 @@ from model import Model
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a tiny Hybrid-UniSE forward/loss smoke check")
-    parser.add_argument("--config", default="conf/hybrid_unise_smoke.yaml")
+    parser.add_argument(
+        "--config",
+        default="conf/examples/hybrid_unise_smoke.yaml",
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--samples", type=int, default=3200)
     args = parser.parse_args()

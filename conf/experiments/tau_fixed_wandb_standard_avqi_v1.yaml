@@ -1,8 +1,12 @@
+# HISTORICAL, MACHINE-BOUND EXPERIMENT CONFIGURATION.
+# Review all data, asset, output, and accelerator settings before reuse.
+# Presence in the repository does not imply that the run succeeded.
+
 accelerator: gpu
 devices: [0]
 
-log_dir: ./logs/tau_fixed_effective_bs16_v1
-checkpoint_dir: ./checkpoints/tau_fixed_effective_bs16_v1
+log_dir: ./logs/tau_fixed_wandb_standard_avqi_v1
+checkpoint_dir: ./checkpoints/tau_fixed_wandb_standard_avqi_v1
 resume: null
 ckpt_path: ./checkpoints/epoch=20-step=109367.ckpt
 save_top_k: 1
@@ -13,18 +17,18 @@ wandb:
   entity: null
   repo_name: QuarkAudio-UniSE
   model_name: unise
-  experiment: tau_fixed_effective_bs16_v1
-  change: effective_bs16_v1
+  experiment: tau_fixed_wandb_standard_avqi_v1
+  change: wandb_standard_avqi_v1
   group: null
   name: null
-  tags: ["tau", "use_simulation", "fixed", "wandb_standard_avqi_v1", "effective_bs16_v1"]
+  tags: ["tau", "use_simulation", "fixed", "wandb_standard_avqi_v1"]
 
 dataset_config:
   train_kwargs:
     dataset_type: use_simulation_fixed
     use_simulation_root: /scratch/work/lil14/USE_simulation
     pair_manifest: /scratch/work/lil14/data/TAU/simulated/phone_room/train/paired.csv
-    batch_size: 16
+    batch_size: 8
     cut_duration: [5.0, 5.0]
     num_workers: 8
     prefetch: 8

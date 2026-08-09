@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
 import inspect
+from typing import Any
 
 import torch
 
@@ -21,7 +21,8 @@ class TransformersXCodecFirstRVQ:
         processor_path: str | None = None,
         encode_method: str = "encode",
         token_attr: str | None = None,
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,
+        revision: str | None = None,
         device: str | None = None,
         bandwidth: float | None = None,
     ):
@@ -38,6 +39,7 @@ class TransformersXCodecFirstRVQ:
         self.processor_path = processor_path or model_path
         self.encode_method = encode_method
         self.token_attr = token_attr
+        self.revision = revision
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.bandwidth = bandwidth
         try:
@@ -46,18 +48,28 @@ class TransformersXCodecFirstRVQ:
             model_cls = XcodecModel
         except ImportError:
             model_cls = AutoModel
-        self.model = model_cls.from_pretrained(model_path, trust_remote_code=trust_remote_code).to(self.device)
+        load_kwargs: dict[str, Any] = {
+            "trust_remote_code": trust_remote_code,
+        }
+        if revision is not None:
+            load_kwargs["revision"] = revision
+        self.model = model_cls.from_pretrained(model_path, **load_kwargs).to(
+            self.device
+        )
         self.model.eval()
         try:
             from transformers import AutoFeatureExtractor
 
             self.processor = AutoFeatureExtractor.from_pretrained(
                 self.processor_path,
-                trust_remote_code=trust_remote_code,
+                **load_kwargs,
             )
         except Exception:
             try:
-                self.processor = AutoProcessor.from_pretrained(self.processor_path, trust_remote_code=trust_remote_code)
+                self.processor = AutoProcessor.from_pretrained(
+                    self.processor_path,
+                    **load_kwargs,
+                )
             except Exception:
                 self.processor = None
         for parameter in self.model.parameters():

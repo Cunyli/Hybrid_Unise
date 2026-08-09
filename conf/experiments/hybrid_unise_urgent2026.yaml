@@ -1,4 +1,8 @@
-# Hybrid-UniSE reproduction config for
+# HISTORICAL, MACHINE-BOUND EXPERIMENT CONFIGURATION.
+# Review all data, asset, output, and accelerator settings before reuse.
+# Presence in the repository does not imply that the run succeeded.
+
+# Paper-inspired Hybrid-UniSE engineering config for
 # "A Hybrid Discriminative and Generative System for Universal Speech Enhancement"
 # arXiv:2601.19113.
 #
@@ -152,5 +156,5 @@ dataset_config:
     enroll_duration: 5.0
     target_sample_rate: null  # keep original rate for SFI discriminative/fusion branches
     batch_format: dict
-    data_src_dir: ./AudioSamples/SR/noisy
-    data_tgt_dir: ./AudioSamples/SR/clean
+    data_src_dir: ./assets/upstream/audio_samples/SR/noisy
+    data_tgt_dir: ./assets/upstream/audio_samples/SR/clean

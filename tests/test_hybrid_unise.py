@@ -2524,7 +2524,7 @@ def test_hybrid_checkpoint_architecture_metadata_ignores_xcodec_wavlm_source_pat
                 "target_type": "wavlm_kmeans_vq",
                 "vocab_size": 128,
                 "wavlm_model_path": (
-                    "/scratch/work/lil14/Hybrid_Unise_autofix_20260711/"
+                    "/frozen/snapshots/hybrid-unise-20260711/"
                     "pretrained/wavlm/microsoft_wavlm-base-plus"
                 ),
                 "layer_index": 11,

@@ -34,14 +34,16 @@ def find_reference_path(reference_root: Path, rel_path: Path) -> Path | None:
     return None
 
 
-def load_checkpoint(model, checkpoint_path: str | None, device: torch.device) -> None:
-    if not checkpoint_path:
-        return
+def load_checkpoint(
+    model,
+    checkpoint_path: str,
+    device: torch.device,
+) -> None:
     checkpoint = load_hybrid_checkpoint(checkpoint_path, map_location=device)
     validate_hybrid_checkpoint_metadata(checkpoint, model.stage)
     validate_hybrid_architecture_metadata(checkpoint, model.architecture_config)
     state_dict = checkpoint.get("state_dict", checkpoint)
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict, strict=True)
 
 
 def write_scp(path: Path, entries: list[tuple[str, Path]]) -> None:
@@ -52,11 +54,18 @@ def write_scp(path: Path, entries: list[tuple[str, Path]]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Hybrid-UniSE directory inference")
-    parser.add_argument("--config", default="conf/hybrid_unise_urgent2026.yaml")
+    parser.add_argument(
+        "--config",
+        default="conf/examples/hybrid_unise_example.yaml",
+    )
     parser.add_argument("--input-root", required=True)
     parser.add_argument("--reference-root", default=None)
     parser.add_argument("--output-root", default="outputs/hybrid_unise")
-    parser.add_argument("--checkpoint", default=None)
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Trusted local checkpoint compatible with the config and stage",
+    )
     parser.add_argument(
         "--stage",
         choices=("disc", "gen", "fusion", "joint"),
@@ -92,7 +101,7 @@ def main() -> int:
 
     device = torch.device(args.device)
     model = Model(config).to(device)
-    load_checkpoint(model, args.checkpoint or config.get("ckpt_path"), device)
+    load_checkpoint(model, args.checkpoint, device)
     model.eval()
 
     inf_entries: list[tuple[str, Path]] = []

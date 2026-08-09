@@ -1,3 +1,7 @@
+# Synthetic engineering smoke configuration.
+# Uses random waveforms and a deterministic token stub. Passing checks tensor
+# contracts only; it is not an enhancement demo or a quality result.
+
 model_type: hybrid_unise
 stage: fusion
 
