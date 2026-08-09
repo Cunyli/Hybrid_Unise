@@ -19,9 +19,9 @@ validate_config = load_validate_config()
 
 REQUIRED_FILES = [
     "README.md",
-    "LICENSE",
-    "NOTICE",
-    "SECURITY.md",
+    "checkpoints/README.md",
+    "pretrained/README.md",
+    "outputs/README.md",
     "conf/README.md",
     "conf/experiments/hybrid_unise_urgent2026.yaml",
     "conf/examples/hybrid_unise_smoke.yaml",

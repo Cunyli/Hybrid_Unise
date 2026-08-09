@@ -2,7 +2,7 @@
 
 ## Code origin
 
-The project began from Alibaba's Apache-2.0-licensed
+The project began from Alibaba's
 [unified-audio / QuarkAudio-UniSE](https://github.com/alibaba/unified-audio/tree/main/QuarkAudio-UniSE)
 codebase.
 
@@ -64,9 +64,8 @@ Some historical configs identify exact local copies or enable remote model
 code. Those paths document the experiment environment; they are not bundled
 assets or portable defaults.
 
-## License boundary
+## Sharing boundary
 
-The root [LICENSE](../LICENSE) covers code distributed under Apache License 2.0.
-External datasets and model weights are not relicensed by this repository.
-Before sharing the inherited demo media beyond research review, verify the
-upstream asset terms independently.
+External datasets and model weights remain separate from this repository.
+Before sharing the inherited demo media beyond research review, verify its
+upstream terms independently.

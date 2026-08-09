@@ -168,7 +168,7 @@ It does not demonstrate speech enhancement.
   are not included.
 - No command in this README downloads assets, submits a job, or starts training.
 
-## Provenance and license
+## Source boundary
 
 The codebase began from Alibaba's
 [unified-audio / QuarkAudio-UniSE](https://github.com/alibaba/unified-audio/tree/main/QuarkAudio-UniSE)
@@ -176,10 +176,9 @@ and retains substantial upstream code alongside independent Hybrid-UniSE
 modifications. It is not affiliated with Alibaba and is not an official
 implementation of the referenced Hybrid-UniSE paper.
 
-See [NOTICE](NOTICE), [LICENSE](LICENSE), and
-[Repository provenance](docs/provenance.md) for code and asset boundaries.
+See [Repository provenance](docs/provenance.md) for code and asset boundaries.
 
-## Research references
+## Related papers
 
 - [A Hybrid Discriminative and Generative System for Universal Speech Enhancement](https://arxiv.org/abs/2601.19113)
 - [UniSE: A Unified Framework for Decoder-only Autoregressive LM-based Speech Enhancement](https://arxiv.org/abs/2510.20441)

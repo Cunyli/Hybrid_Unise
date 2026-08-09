@@ -32,8 +32,11 @@ conf/generated/**
 
 !logs/.gitkeep
 !checkpoints/.gitkeep
+!checkpoints/README.md
 !pretrained/.gitkeep
+!pretrained/README.md
 !outputs/.gitkeep
+!outputs/README.md
 !runs/.gitkeep
 !tmp/.gitkeep
 !conf/generated/.gitkeep
